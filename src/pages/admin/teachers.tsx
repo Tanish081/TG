@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { Copy, Users } from "lucide-react"
+import { Users } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import type { Database } from "@/types/database"
 import { SectionShell } from "@/components/section-shell"
@@ -27,13 +27,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 type Teacher = Database["public"]["Tables"]["teachers"]["Row"]
-
-// Must match PLACEHOLDER_EMAIL_DOMAIN in supabase/functions/invite-teacher/index.ts
-const PLACEHOLDER_EMAIL_DOMAIN = "no-email.teacherguardian.invalid"
-const isPlaceholderEmail = (email: string) => email.endsWith(`@${PLACEHOLDER_EMAIL_DOMAIN}`)
 
 export default function TeachersPage() {
   const queryClient = useQueryClient()
@@ -41,15 +36,8 @@ export default function TeachersPage() {
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
 
-  const [addMode, setAddMode] = useState<"invite" | "name-only">("invite")
-  const [placeholderName, setPlaceholderName] = useState("")
-
   const [renameTarget, setRenameTarget] = useState<Teacher | null>(null)
   const [renameValue, setRenameValue] = useState("")
-
-  const [emailTarget, setEmailTarget] = useState<Teacher | null>(null)
-  const [emailValue, setEmailValue] = useState("")
-  const [recoveryLink, setRecoveryLink] = useState<string | null>(null)
 
   const { data: teachers, isLoading } = useQuery({
     queryKey: ["teachers"],
@@ -86,7 +74,7 @@ export default function TeachersPage() {
   const invite = useMutation({
     mutationFn: async () => {
       const { error } = await supabase.functions.invoke("invite-teacher", {
-        body: { action: "invite", email, name },
+        body: { email, name },
       })
       if (error) throw error
     },
@@ -95,41 +83,6 @@ export default function TeachersPage() {
       setOpen(false)
       setName("")
       setEmail("")
-      queryClient.invalidateQueries({ queryKey: ["teachers"] })
-    },
-    onError: (err: Error) => toast.error(err.message),
-  })
-
-  const addPlaceholder = useMutation({
-    mutationFn: async () => {
-      const { error } = await supabase.functions.invoke("invite-teacher", {
-        body: { action: "add", name: placeholderName },
-      })
-      if (error) throw error
-    },
-    onSuccess: () => {
-      toast.success(`Added ${placeholderName} — set their real email later to invite them`)
-      setOpen(false)
-      setPlaceholderName("")
-      queryClient.invalidateQueries({ queryKey: ["teachers"] })
-    },
-    onError: (err: Error) => toast.error(err.message),
-  })
-
-  const setEmail_ = useMutation({
-    mutationFn: async () => {
-      if (!emailTarget) return
-      const { data, error } = await supabase.functions.invoke("invite-teacher", {
-        body: { action: "set-email", teacherId: emailTarget.id, email: emailValue },
-      })
-      if (error) throw error
-      return data as { actionLink: string | null }
-    },
-    onSuccess: (data) => {
-      toast.success("Email updated")
-      setEmailTarget(null)
-      setEmailValue("")
-      setRecoveryLink(data?.actionLink ?? null)
       queryClient.invalidateQueries({ queryKey: ["teachers"] })
     },
     onError: (err: Error) => toast.error(err.message),
@@ -174,84 +127,42 @@ export default function TeachersPage() {
     <SectionShell
       icon={Users}
       title="Teachers"
-      subtitle="Invite teachers by email, or add them by name and fill in email later."
+      subtitle="Invite teachers by email, then grant Dept Coordinator or HOD as needed."
       accent="blue"
       action={
-        <Dialog
-          open={open}
-          onOpenChange={(next) => {
-            setOpen(next)
-            if (!next) {
-              setName("")
-              setEmail("")
-              setPlaceholderName("")
-              setAddMode("invite")
-            }
-          }}
-        >
+        <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
-            <Button>Add teacher</Button>
+            <Button>Invite teacher</Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Add a teacher</DialogTitle>
+              <DialogTitle>Invite a teacher</DialogTitle>
+              <DialogDescription>
+                They'll receive an email to set their password and sign in.
+              </DialogDescription>
             </DialogHeader>
-            <Tabs value={addMode} onValueChange={(v) => setAddMode(v as "invite" | "name-only")}>
-              <TabsList className="mb-2 w-full">
-                <TabsTrigger value="invite" className="flex-1">
-                  Invite by email
-                </TabsTrigger>
-                <TabsTrigger value="name-only" className="flex-1">
-                  Name only
-                </TabsTrigger>
-              </TabsList>
-              <TabsContent value="invite" className="flex flex-col gap-4">
-                <DialogDescription>
-                  They'll receive an email to set their password and sign in.
-                </DialogDescription>
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="t-name">Name</Label>
-                  <Input id="t-name" value={name} onChange={(e) => setName(e.target.value)} />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="t-email">Email</Label>
-                  <Input
-                    id="t-email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </div>
-              </TabsContent>
-              <TabsContent value="name-only" className="flex flex-col gap-4">
-                <DialogDescription>
-                  For real rosters where you have names but not emails yet. The account is created
-                  right away but can't sign in until you fill in a real email later (each teacher's
-                  row will show a "Set email" action).
-                </DialogDescription>
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="t-pname">Name</Label>
-                  <Input
-                    id="t-pname"
-                    value={placeholderName}
-                    onChange={(e) => setPlaceholderName(e.target.value)}
-                  />
-                </div>
-              </TabsContent>
-            </Tabs>
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="t-name">Name</Label>
+                <Input id="t-name" value={name} onChange={(e) => setName(e.target.value)} />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="t-email">Email</Label>
+                <Input
+                  id="t-email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
+            </div>
             <DialogFooter>
-              {addMode === "invite" ? (
-                <Button onClick={() => invite.mutate()} disabled={!email || invite.isPending}>
-                  {invite.isPending ? "Sending…" : "Send invite"}
-                </Button>
-              ) : (
-                <Button
-                  onClick={() => addPlaceholder.mutate()}
-                  disabled={!placeholderName || addPlaceholder.isPending}
-                >
-                  {addPlaceholder.isPending ? "Adding…" : "Add teacher"}
-                </Button>
-              )}
+              <Button
+                onClick={() => invite.mutate()}
+                disabled={!email || invite.isPending}
+              >
+                {invite.isPending ? "Sending…" : "Send invite"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -279,13 +190,7 @@ export default function TeachersPage() {
             {teachers?.map((t) => (
               <TableRow key={t.id}>
                 <TableCell>{t.name}</TableCell>
-                <TableCell>
-                  {isPlaceholderEmail(t.email) ? (
-                    <Badge variant="destructive">No email yet</Badge>
-                  ) : (
-                    t.email
-                  )}
-                </TableCell>
+                <TableCell>{t.email}</TableCell>
                 <TableCell>
                   <div className="flex flex-wrap gap-1">
                     {t.is_dept_coordinator && <Badge>Dept Coordinator</Badge>}
@@ -320,18 +225,6 @@ export default function TeachersPage() {
                     >
                       Rename
                     </Button>
-                    {isPlaceholderEmail(t.email) && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setEmailTarget(t)
-                          setEmailValue("")
-                        }}
-                      >
-                        Set email
-                      </Button>
-                    )}
                     <Button
                       variant="outline"
                       size="sm"
@@ -378,71 +271,6 @@ export default function TeachersPage() {
               {rename.isPending ? "Saving…" : "Save"}
             </Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={!!emailTarget}
-        onOpenChange={(open) => {
-          if (!open) {
-            setEmailTarget(null)
-            setEmailValue("")
-          }
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Set real email — {emailTarget?.name}</DialogTitle>
-            <DialogDescription>
-              Replaces the placeholder address so this teacher can sign in. You'll get a one-time
-              link afterward to send them directly.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="set-email-input">Email</Label>
-            <Input
-              id="set-email-input"
-              type="email"
-              value={emailValue}
-              onChange={(e) => setEmailValue(e.target.value)}
-            />
-          </div>
-          <DialogFooter>
-            <Button
-              onClick={() => setEmail_.mutate()}
-              disabled={!emailValue || setEmail_.isPending}
-            >
-              {setEmail_.isPending ? "Saving…" : "Save email"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={!!recoveryLink} onOpenChange={(open) => !open && setRecoveryLink(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Send this link to the teacher</DialogTitle>
-            <DialogDescription>
-              One-time link to set their password and sign in. It isn't emailed automatically —
-              copy it and send it yourself (WhatsApp, in person, etc).
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex items-center gap-2">
-            <Input readOnly value={recoveryLink ?? ""} className="font-mono text-xs" />
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              onClick={() => {
-                if (recoveryLink) {
-                  navigator.clipboard.writeText(recoveryLink)
-                  toast.success("Copied")
-                }
-              }}
-            >
-              <Copy className="size-4" />
-            </Button>
-          </div>
         </DialogContent>
       </Dialog>
     </SectionShell>
