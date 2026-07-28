@@ -36,6 +36,7 @@ export interface Database {
           email: string | null
           phone: string | null
           status: StudentStatus
+          created_by: string | null
           created_at: string
         },
         {
@@ -45,6 +46,7 @@ export interface Database {
           email?: string | null
           phone?: string | null
           status?: StudentStatus
+          created_by?: string | null
         },
         {
           prn?: string | null
@@ -52,6 +54,7 @@ export interface Database {
           email?: string | null
           phone?: string | null
           status?: StudentStatus
+          created_by?: string | null
         }
       >
       student_enrollments: Tbl<

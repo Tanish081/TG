@@ -19,6 +19,9 @@ dist-ssr
 *.xls
 *.xlsx
 
+# Local Supabase CLI state (from `supabase link`/`deploy`)
+supabase/.temp
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

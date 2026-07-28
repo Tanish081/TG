@@ -166,14 +166,24 @@ create policy students_select_class_teacher on students
 -- incoming division) and read it straight back — Postgres requires the
 -- freshly-inserted row to also pass a SELECT policy for `INSERT ... RETURNING`
 -- to work, and a brand-new student has no enrollment yet for the policy
--- above to match.
+-- above to match. `created_by` must be their own id, both so the read-back
+-- policy below actually matches and so one class teacher can't backdate
+-- rows as if another teacher created them.
 create policy students_insert_class_teacher on students
   for insert to authenticated
-  with check (is_class_teacher());
+  with check (is_class_teacher() and created_by = auth.uid());
 
-create policy students_select_class_teacher_broad on students
+-- Scoped to "students I just created that aren't enrolled yet" — not a
+-- blanket "is a class teacher of something" grant. A brand-new student has
+-- no enrollment for students_select_class_teacher (below) to key off yet,
+-- so this covers only that gap; once enrolled, that policy takes over and
+-- this one no longer matches (the row now has an enrollment).
+create policy students_select_class_teacher_own_new on students
   for select to authenticated
-  using (is_class_teacher());
+  using (
+    created_by = auth.uid()
+    and not exists (select 1 from student_enrollments se where se.student_id = students.id)
+  );
 
 create policy students_select_tg on students
   for select to authenticated

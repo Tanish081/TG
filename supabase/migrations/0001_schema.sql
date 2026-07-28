@@ -56,6 +56,10 @@ create table students (
   email             text,
   phone             text,
   status            text not null default 'active' check (status in ('active', 'yd', 'left')),
+  -- Who inserted this row (e.g. a class teacher onboarding a new student).
+  -- Used by RLS to scope pre-enrollment visibility to its own creator —
+  -- see students_select_class_teacher_own_new in 0002_rls.sql.
+  created_by        uuid references teachers (id),
   created_at        timestamptz not null default now()
 );
 

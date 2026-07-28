@@ -239,6 +239,7 @@ export default function MyDivisionPage() {
               name: r.name,
               email: r.email,
               phone: r.phone,
+              created_by: teacher!.id,
             })),
           )
           .select("id")
