@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { Users } from "lucide-react"
@@ -47,6 +47,29 @@ export default function TeachersPage() {
       return data
     },
   })
+
+  const { data: divisions } = useQuery({
+    queryKey: ["divisions"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("divisions")
+        .select("id, year_level, division, branch_code, academic_year, class_teacher_id")
+      if (error) throw error
+      return data
+    },
+  })
+
+  const classTeacherOf = useMemo(() => {
+    const map = new Map<string, string[]>()
+    for (const d of divisions ?? []) {
+      if (!d.class_teacher_id) continue
+      const label = `${d.year_level}-${d.division}`
+      const list = map.get(d.class_teacher_id) ?? []
+      list.push(label)
+      map.set(d.class_teacher_id, list)
+    }
+    return map
+  }, [divisions])
 
   const invite = useMutation({
     mutationFn: async () => {
@@ -152,13 +175,14 @@ export default function TeachersPage() {
               <TableHead>Name</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Role</TableHead>
+              <TableHead>Class teacher of</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading && (
               <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground">
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
                   Loading…
                 </TableCell>
               </TableRow>
@@ -173,6 +197,19 @@ export default function TeachersPage() {
                     {t.is_hod && <Badge variant="outline">HOD</Badge>}
                     {!t.is_dept_coordinator && !t.is_hod && (
                       <Badge variant="secondary">Teacher</Badge>
+                    )}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <div className="flex flex-wrap gap-1">
+                    {(classTeacherOf.get(t.id) ?? []).length === 0 ? (
+                      <span className="text-sm text-muted-foreground">—</span>
+                    ) : (
+                      classTeacherOf.get(t.id)!.map((label) => (
+                        <Badge key={label} variant="outline">
+                          {label}
+                        </Badge>
+                      ))
                     )}
                   </div>
                 </TableCell>
