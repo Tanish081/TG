@@ -39,6 +39,8 @@ export default function TeachersPage() {
   const [renameTarget, setRenameTarget] = useState<Teacher | null>(null)
   const [renameValue, setRenameValue] = useState("")
 
+  const [deleteTarget, setDeleteTarget] = useState<Teacher | null>(null)
+
   const { data: teachers, isLoading } = useQuery({
     queryKey: ["teachers"],
     queryFn: async () => {
@@ -119,6 +121,23 @@ export default function TeachersPage() {
       toast.success("Name updated")
       setRenameTarget(null)
       queryClient.invalidateQueries({ queryKey: ["teachers"] })
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const deleteTeacher = useMutation({
+    mutationFn: async () => {
+      if (!deleteTarget) return
+      const { error } = await supabase.functions.invoke("invite-teacher", {
+        body: { action: "delete", teacherId: deleteTarget.id },
+      })
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success(`Deleted ${deleteTarget?.name}`)
+      setDeleteTarget(null)
+      queryClient.invalidateQueries({ queryKey: ["teachers"] })
+      queryClient.invalidateQueries({ queryKey: ["divisions"] })
     },
     onError: (err: Error) => toast.error(err.message),
   })
@@ -244,6 +263,9 @@ export default function TeachersPage() {
                     >
                       {t.is_hod ? "Revoke HOD" : "Make HOD"}
                     </Button>
+                    <Button variant="ghost" size="sm" onClick={() => setDeleteTarget(t)}>
+                      Delete
+                    </Button>
                   </div>
                 </TableCell>
               </TableRow>
@@ -269,6 +291,28 @@ export default function TeachersPage() {
           <DialogFooter>
             <Button onClick={() => rename.mutate()} disabled={!renameValue || rename.isPending}>
               {rename.isPending ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete {deleteTarget?.name}?</DialogTitle>
+            <DialogDescription>
+              This permanently removes their account — they won't be able to log in again. This
+              can't be undone. If they're still assigned as a class teacher, TG, or cohort teacher
+              somewhere, the delete will fail until you reassign that first.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="destructive"
+              onClick={() => deleteTeacher.mutate()}
+              disabled={deleteTeacher.isPending}
+            >
+              {deleteTeacher.isPending ? "Deleting…" : "Delete teacher"}
             </Button>
           </DialogFooter>
         </DialogContent>

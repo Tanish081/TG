@@ -1,13 +1,20 @@
 // Edge Function: invite-teacher
 //
-// Creates a new teacher's auth account (which triggers the `teachers` row
-// via on_auth_user_created) and emails them a set-password invite.
+// Two actions, both gated to the Dept Coordinator (verified below using the
+// caller's own JWT before switching to the service-role client):
+//
+//   invite   — creates a new teacher's auth account (which triggers the
+//              `teachers` row via on_auth_user_created) and emails them a
+//              set-password invite. This is the default action.
+//   delete   — removes a teacher's auth account entirely. `teachers.id`
+//              references `auth.users.id` with `on delete cascade`, so this
+//              also removes their `teachers` row and anything that
+//              cascades from it.
+//
 // Requires the service-role key, so this cannot run on the client (§1).
-// Only an HOD may call it — verified below using the caller's own JWT
-// before switching to the service-role client to perform the invite.
 //
 // Deploy: supabase functions deploy invite-teacher
-// Call from the client: supabase.functions.invoke('invite-teacher', { body: { email, name } })
+// Call from the client: supabase.functions.invoke('invite-teacher', { body: { action, ... } })
 
 import { createClient } from "npm:@supabase/supabase-js@2"
 
@@ -39,20 +46,42 @@ Deno.serve(async (req) => {
 
   const { data: callerTeacher } = await callerClient
     .from("teachers")
-    .select("is_hod")
+    .select("is_dept_coordinator")
     .eq("id", user.id)
     .single()
 
-  if (!callerTeacher?.is_hod) {
-    return new Response(JSON.stringify({ error: "Only an HOD can invite teachers" }), { status: 403 })
+  if (!callerTeacher?.is_dept_coordinator) {
+    return new Response(JSON.stringify({ error: "Only a Dept Coordinator can manage teachers" }), {
+      status: 403,
+    })
   }
 
-  const { email, name } = await req.json()
+  const body = await req.json()
+  const action = body.action ?? "invite"
+  const adminClient = createClient(supabaseUrl, serviceRoleKey)
+
+  if (action === "delete") {
+    const { teacherId } = body
+    if (!teacherId || typeof teacherId !== "string") {
+      return new Response(JSON.stringify({ error: "teacherId is required" }), { status: 400 })
+    }
+    if (teacherId === user.id) {
+      return new Response(JSON.stringify({ error: "You can't delete your own account" }), {
+        status: 400,
+      })
+    }
+    const { error } = await adminClient.auth.admin.deleteUser(teacherId)
+    if (error) return new Response(JSON.stringify({ error: error.message }), { status: 400 })
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })
+  }
+
+  const { email, name } = body
   if (!email || typeof email !== "string") {
     return new Response(JSON.stringify({ error: "email is required" }), { status: 400 })
   }
-
-  const adminClient = createClient(supabaseUrl, serviceRoleKey)
 
   const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email, {
     data: { name: name ?? email },
