@@ -60,6 +60,11 @@ export default function CohortsPage() {
   const [syncCohort, setSyncCohort] = useState<CohortWithDetails | null>(null)
   const [syncDivisionId, setSyncDivisionId] = useState("")
 
+  const [editTarget, setEditTarget] = useState<CohortWithDetails | null>(null)
+  const [editLabel, setEditLabel] = useState("")
+  const [editSubjectId, setEditSubjectId] = useState("")
+  const [editAcademicYear, setEditAcademicYear] = useState("")
+
   const [openYear, setOpenYear] = useState<YearLevel | "elective" | null>(null)
   const [openDivision, setOpenDivision] = useState<string | null>(null)
 
@@ -135,6 +140,13 @@ export default function CohortsPage() {
       : openDivision
         ? (divisionFolders.find((f) => f.division === openDivision)?.cohorts ?? [])
         : []
+
+  // A core cohort's subject must stay within its own division's year level;
+  // electives aren't pinned to a division, so their subject list is unfiltered.
+  const editAvailableSubjects =
+    editTarget?.type === "core" && editTarget.year_level
+      ? subjects?.filter((s) => s.year_level === editTarget.year_level)
+      : subjects
 
   const create = useMutation({
     mutationFn: async () => {
@@ -243,6 +255,27 @@ export default function CohortsPage() {
       toast.success(`Synced — ${count ?? 0} students in cohort now`)
       setSyncCohort(null)
       setSyncDivisionId("")
+      queryClient.invalidateQueries({ queryKey: ["cohorts-admin"] })
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const edit = useMutation({
+    mutationFn: async () => {
+      if (!editTarget) return
+      const { error } = await supabase
+        .from("cohorts")
+        .update({
+          label: editLabel,
+          subject_id: editSubjectId,
+          academic_year: editAcademicYear,
+        })
+        .eq("id", editTarget.id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success("Cohort updated")
+      setEditTarget(null)
       queryClient.invalidateQueries({ queryKey: ["cohorts-admin"] })
     },
     onError: (err: Error) => toast.error(err.message),
@@ -482,6 +515,18 @@ export default function CohortsPage() {
                     <TableCell>{c.teaching_assignments?.teacher?.name ?? "—"}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setEditTarget(c)
+                            setEditLabel(c.label)
+                            setEditSubjectId(c.subject_id)
+                            setEditAcademicYear(c.academic_year)
+                          }}
+                        >
+                          Edit
+                        </Button>
                         {c.type === "core" && (
                           <Button
                             variant="outline"
@@ -575,6 +620,54 @@ export default function CohortsPage() {
           <DialogFooter>
             <Button onClick={() => sync.mutate()} disabled={!syncDivisionId || sync.isPending}>
               {sync.isPending ? "Syncing…" : "Sync now"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editTarget} onOpenChange={(open) => !open && setEditTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit cohort</DialogTitle>
+            <DialogDescription>
+              {editTarget?.type === "core"
+                ? "To move this cohort to a different division, use \"Sync members\" instead — this only edits its label, subject, and academic year."
+                : "Elective cohort — label, subject, and academic year."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <Label>Subject</Label>
+              <Select value={editSubjectId} onValueChange={setEditSubjectId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Pick a subject" />
+                </SelectTrigger>
+                <SelectContent>
+                  {editAvailableSubjects?.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.code} — {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="flex flex-col gap-2">
+                <Label>Academic year</Label>
+                <Input value={editAcademicYear} onChange={(e) => setEditAcademicYear(e.target.value)} />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label>Label</Label>
+                <Input value={editLabel} onChange={(e) => setEditLabel(e.target.value)} />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => edit.mutate()}
+              disabled={!editLabel || !editSubjectId || !editAcademicYear || edit.isPending}
+            >
+              {edit.isPending ? "Saving…" : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>

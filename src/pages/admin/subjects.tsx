@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { ArrowLeft, BookOpen, FolderOpen } from "lucide-react"
 import { supabase } from "@/lib/supabase"
-import type { YearLevel } from "@/types/database"
+import type { Database, YearLevel } from "@/types/database"
 import { SectionShell } from "@/components/section-shell"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -36,6 +36,8 @@ import {
 
 const YEAR_LEVELS: YearLevel[] = ["FE", "SE", "TE", "BE"]
 
+type Subject = Database["public"]["Tables"]["subjects"]["Row"]
+
 export default function SubjectsPage() {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
@@ -44,6 +46,12 @@ export default function SubjectsPage() {
   const [yearLevel, setYearLevel] = useState<YearLevel>("SE")
   const [semester, setSemester] = useState("3")
   const [openYear, setOpenYear] = useState<YearLevel | null>(null)
+
+  const [editTarget, setEditTarget] = useState<Subject | null>(null)
+  const [editName, setEditName] = useState("")
+  const [editCode, setEditCode] = useState("")
+  const [editYearLevel, setEditYearLevel] = useState<YearLevel>("SE")
+  const [editSemester, setEditSemester] = useState("3")
 
   const { data: subjects, isLoading } = useQuery({
     queryKey: ["subjects"],
@@ -89,6 +97,28 @@ export default function SubjectsPage() {
       if (error) throw error
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["subjects"] }),
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const edit = useMutation({
+    mutationFn: async () => {
+      if (!editTarget) return
+      const { error } = await supabase
+        .from("subjects")
+        .update({
+          name: editName,
+          code: editCode,
+          year_level: editYearLevel,
+          semester: Number(editSemester),
+        })
+        .eq("id", editTarget.id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success("Subject updated")
+      setEditTarget(null)
+      queryClient.invalidateQueries({ queryKey: ["subjects"] })
+    },
     onError: (err: Error) => toast.error(err.message),
   })
 
@@ -211,9 +241,24 @@ export default function SubjectsPage() {
                     <TableCell>{s.name}</TableCell>
                     <TableCell>{s.semester}</TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="sm" onClick={() => remove.mutate(s.id)}>
-                        Delete
-                      </Button>
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setEditTarget(s)
+                            setEditName(s.name)
+                            setEditCode(s.code)
+                            setEditYearLevel(s.year_level)
+                            setEditSemester(String(s.semester))
+                          }}
+                        >
+                          Edit
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => remove.mutate(s.id)}>
+                          Delete
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -222,6 +267,55 @@ export default function SubjectsPage() {
           </Card>
         </>
       )}
+
+      <Dialog open={!!editTarget} onOpenChange={(open) => !open && setEditTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit subject</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="es-name">Name</Label>
+              <Input id="es-name" value={editName} onChange={(e) => setEditName(e.target.value)} />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="es-code">Code</Label>
+              <Input id="es-code" value={editCode} onChange={(e) => setEditCode(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="flex flex-col gap-2">
+                <Label>Year level</Label>
+                <Select value={editYearLevel} onValueChange={(v) => setEditYearLevel(v as YearLevel)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {YEAR_LEVELS.map((y) => (
+                      <SelectItem key={y} value={y}>
+                        {y}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="es-sem">Semester</Label>
+                <Input
+                  id="es-sem"
+                  type="number"
+                  value={editSemester}
+                  onChange={(e) => setEditSemester(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => edit.mutate()} disabled={!editName || !editCode || edit.isPending}>
+              {edit.isPending ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </SectionShell>
   )
 }
