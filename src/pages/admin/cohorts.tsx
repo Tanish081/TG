@@ -1,10 +1,12 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { LayoutDashboard } from "lucide-react"
+import { ArrowLeft, FolderOpen, LayoutDashboard, Shuffle } from "lucide-react"
 import { supabase } from "@/lib/supabase"
-import type { Database } from "@/types/database"
+import type { Database, YearLevel } from "@/types/database"
 import { SectionShell } from "@/components/section-shell"
+
+const YEAR_LEVELS: YearLevel[] = ["FE", "SE", "TE", "BE"]
 
 type CohortWithDetails = Database["public"]["Tables"]["cohorts"]["Row"] & {
   subject: { code: string; name: string } | null
@@ -58,6 +60,9 @@ export default function CohortsPage() {
   const [syncCohort, setSyncCohort] = useState<CohortWithDetails | null>(null)
   const [syncDivisionId, setSyncDivisionId] = useState("")
 
+  const [openYear, setOpenYear] = useState<YearLevel | "elective" | null>(null)
+  const [openDivision, setOpenDivision] = useState<string | null>(null)
+
   const { data: subjects } = useQuery({
     queryKey: ["subjects"],
     queryFn: async () => {
@@ -105,6 +110,31 @@ export default function CohortsPage() {
       return (data ?? []) as unknown as CohortWithDetails[]
     },
   })
+
+  const coreCohorts = useMemo(() => (cohorts ?? []).filter((c) => c.type === "core"), [cohorts])
+  const electiveCohorts = useMemo(() => (cohorts ?? []).filter((c) => c.type === "elective"), [cohorts])
+
+  const yearFolders = useMemo(
+    () => YEAR_LEVELS.map((y) => ({ year: y, cohorts: coreCohorts.filter((c) => c.year_level === y) })),
+    [coreCohorts],
+  )
+
+  const divisionFolders = useMemo(() => {
+    if (!openYear || openYear === "elective") return []
+    const inYear = coreCohorts.filter((c) => c.year_level === openYear)
+    const letters = [...new Set(inYear.map((c) => c.division).filter((d): d is string => !!d))].sort()
+    return letters.map((d) => ({
+      division: d,
+      cohorts: inYear.filter((c) => c.division === d).sort((a, b) => a.label.localeCompare(b.label)),
+    }))
+  }, [coreCohorts, openYear])
+
+  const activeCohorts =
+    openYear === "elective"
+      ? electiveCohorts
+      : openDivision
+        ? (divisionFolders.find((f) => f.division === openDivision)?.cohorts ?? [])
+        : []
 
   const create = useMutation({
     mutationFn: async () => {
@@ -332,74 +362,165 @@ export default function CohortsPage() {
         </Dialog>
       }
     >
-      <Card className="border-slate-200/70 bg-white/70 shadow-sm backdrop-blur-sm">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Label</TableHead>
-            <TableHead>Subject</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead>Members</TableHead>
-            <TableHead>Teacher</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {isLoading && (
-            <TableRow>
-              <TableCell colSpan={6} className="text-center text-muted-foreground">
-                Loading…
-              </TableCell>
-            </TableRow>
-          )}
-          {cohorts?.map((c) => (
-            <TableRow key={c.id}>
-              <TableCell>{c.label}</TableCell>
-              <TableCell>{c.subject?.code}</TableCell>
-              <TableCell>
-                <Badge variant={c.type === "core" ? "secondary" : "outline"}>{c.type}</Badge>
-              </TableCell>
-              <TableCell>{c.cohort_members?.[0]?.count ?? 0}</TableCell>
-              <TableCell>{c.teaching_assignments?.teacher?.name ?? "—"}</TableCell>
-              <TableCell className="text-right">
-                <div className="flex justify-end gap-2">
-                  {c.type === "core" && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setSyncCohort(c)
-                        setSyncDivisionId(
-                          divisions?.find(
-                            (d) =>
-                              d.year_level === c.year_level &&
-                              d.branch_code === c.branch_code &&
-                              d.division === c.division,
-                          )?.id ?? "",
-                        )
-                      }}
-                    >
-                      Sync members
-                    </Button>
-                  )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setAssignCohortId(c.id)
-                      setAssignTeacherId(c.teaching_assignments?.teacher_id ?? "")
-                      setAssignOpen(true)
-                    }}
-                  >
-                    {c.teaching_assignments ? "Reassign teacher" : "Assign teacher"}
-                  </Button>
-                </div>
-              </TableCell>
-            </TableRow>
+      {isLoading && <p className="text-sm text-slate-500">Loading…</p>}
+
+      {!isLoading && !openYear && (
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          {yearFolders.map((f) => (
+            <Card
+              key={f.year}
+              role="button"
+              onClick={() => setOpenYear(f.year)}
+              className="cursor-pointer border-slate-200/70 bg-white/70 p-4 shadow-sm backdrop-blur-sm transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
+            >
+              <div className="mb-2 flex size-9 items-center justify-center rounded-xl bg-blue-100 text-blue-700">
+                <FolderOpen className="size-4.5" />
+              </div>
+              <p className="text-base font-semibold text-slate-900">{f.year}</p>
+              <p className="text-sm text-slate-500">
+                {f.cohorts.length} core cohort{f.cohorts.length === 1 ? "" : "s"}
+              </p>
+            </Card>
           ))}
-        </TableBody>
-      </Table>
-      </Card>
+          <Card
+            role="button"
+            onClick={() => setOpenYear("elective")}
+            className="cursor-pointer border-slate-200/70 bg-white/70 p-4 shadow-sm backdrop-blur-sm transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
+          >
+            <div className="mb-2 flex size-9 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
+              <Shuffle className="size-4.5" />
+            </div>
+            <p className="text-base font-semibold text-slate-900">Elective</p>
+            <p className="text-sm text-slate-500">
+              {electiveCohorts.length} cohort{electiveCohorts.length === 1 ? "" : "s"}
+            </p>
+          </Card>
+        </div>
+      )}
+
+      {openYear && openYear !== "elective" && !openDivision && (
+        <>
+          <button
+            onClick={() => setOpenYear(null)}
+            className="mb-3 flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900"
+          >
+            <ArrowLeft className="size-3.5" /> All years
+          </button>
+          <div className="mb-3 flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-slate-900">{openYear}</h2>
+          </div>
+          {divisionFolders.length === 0 ? (
+            <p className="text-sm text-slate-500">No core cohorts in {openYear} yet.</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              {divisionFolders.map((f) => (
+                <Card
+                  key={f.division}
+                  role="button"
+                  onClick={() => setOpenDivision(f.division)}
+                  className="cursor-pointer border-slate-200/70 bg-white/70 p-4 shadow-sm backdrop-blur-sm transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
+                >
+                  <div className="mb-2 flex size-9 items-center justify-center rounded-xl bg-blue-100 text-blue-700">
+                    <FolderOpen className="size-4.5" />
+                  </div>
+                  <p className="text-base font-semibold text-slate-900">
+                    {openYear} {f.division}
+                  </p>
+                  <p className="text-sm text-slate-500">
+                    {f.cohorts.length} cohort{f.cohorts.length === 1 ? "" : "s"}
+                  </p>
+                </Card>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {(openDivision || openYear === "elective") && (
+        <>
+          <button
+            onClick={() => (openYear === "elective" ? setOpenYear(null) : setOpenDivision(null))}
+            className="mb-3 flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900"
+          >
+            <ArrowLeft className="size-3.5" />
+            {openYear === "elective" ? "All years" : `${openYear} divisions`}
+          </button>
+          <div className="mb-3 flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-slate-900">
+              {openYear === "elective" ? "Elective" : `${openYear} ${openDivision}`}
+            </h2>
+            <Badge variant="secondary">{activeCohorts.length}</Badge>
+          </div>
+          <Card className="border-slate-200/70 bg-white/70 shadow-sm backdrop-blur-sm">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Label</TableHead>
+                  <TableHead>Subject</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Members</TableHead>
+                  <TableHead>Teacher</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {activeCohorts.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-muted-foreground">
+                      No cohorts here yet
+                    </TableCell>
+                  </TableRow>
+                )}
+                {activeCohorts.map((c) => (
+                  <TableRow key={c.id}>
+                    <TableCell>{c.label}</TableCell>
+                    <TableCell>{c.subject?.code}</TableCell>
+                    <TableCell>
+                      <Badge variant={c.type === "core" ? "secondary" : "outline"}>{c.type}</Badge>
+                    </TableCell>
+                    <TableCell>{c.cohort_members?.[0]?.count ?? 0}</TableCell>
+                    <TableCell>{c.teaching_assignments?.teacher?.name ?? "—"}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        {c.type === "core" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setSyncCohort(c)
+                              setSyncDivisionId(
+                                divisions?.find(
+                                  (d) =>
+                                    d.year_level === c.year_level &&
+                                    d.branch_code === c.branch_code &&
+                                    d.division === c.division,
+                                )?.id ?? "",
+                              )
+                            }}
+                          >
+                            Sync members
+                          </Button>
+                        )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setAssignCohortId(c.id)
+                            setAssignTeacherId(c.teaching_assignments?.teacher_id ?? "")
+                            setAssignOpen(true)
+                          }}
+                        >
+                          {c.teaching_assignments ? "Reassign teacher" : "Assign teacher"}
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
+        </>
+      )}
 
       <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
         <DialogContent>

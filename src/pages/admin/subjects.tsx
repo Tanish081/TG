@@ -1,10 +1,11 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { BookOpen } from "lucide-react"
+import { ArrowLeft, BookOpen, FolderOpen } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import type { YearLevel } from "@/types/database"
 import { SectionShell } from "@/components/section-shell"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -42,6 +43,7 @@ export default function SubjectsPage() {
   const [code, setCode] = useState("")
   const [yearLevel, setYearLevel] = useState<YearLevel>("SE")
   const [semester, setSemester] = useState("3")
+  const [openYear, setOpenYear] = useState<YearLevel | null>(null)
 
   const { data: subjects, isLoading } = useQuery({
     queryKey: ["subjects"],
@@ -51,6 +53,15 @@ export default function SubjectsPage() {
       return data
     },
   })
+
+  const yearFolders = useMemo(() => {
+    return YEAR_LEVELS.map((y) => ({
+      year: y,
+      subjects: (subjects ?? []).filter((s) => s.year_level === y).sort((a, b) => a.code.localeCompare(b.code)),
+    }))
+  }, [subjects])
+
+  const activeFolder = yearFolders.find((f) => f.year === openYear)
 
   const create = useMutation({
     mutationFn: async () => {
@@ -141,41 +152,76 @@ export default function SubjectsPage() {
         </Dialog>
       }
     >
-      <Card className="border-slate-200/70 bg-white/70 shadow-sm backdrop-blur-sm">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Code</TableHead>
-            <TableHead>Name</TableHead>
-            <TableHead>Year</TableHead>
-            <TableHead>Sem</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {isLoading && (
-            <TableRow>
-              <TableCell colSpan={5} className="text-center text-muted-foreground">
-                Loading…
-              </TableCell>
-            </TableRow>
-          )}
-          {subjects?.map((s) => (
-            <TableRow key={s.id}>
-              <TableCell>{s.code}</TableCell>
-              <TableCell>{s.name}</TableCell>
-              <TableCell>{s.year_level}</TableCell>
-              <TableCell>{s.semester}</TableCell>
-              <TableCell className="text-right">
-                <Button variant="ghost" size="sm" onClick={() => remove.mutate(s.id)}>
-                  Delete
-                </Button>
-              </TableCell>
-            </TableRow>
+      {isLoading && <p className="text-sm text-slate-500">Loading…</p>}
+
+      {!isLoading && !activeFolder && (
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          {yearFolders.map((f) => (
+            <Card
+              key={f.year}
+              role="button"
+              onClick={() => setOpenYear(f.year)}
+              className="cursor-pointer border-slate-200/70 bg-white/70 p-4 shadow-sm backdrop-blur-sm transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
+            >
+              <div className="mb-2 flex size-9 items-center justify-center rounded-xl bg-blue-100 text-blue-700">
+                <FolderOpen className="size-4.5" />
+              </div>
+              <p className="text-base font-semibold text-slate-900">{f.year}</p>
+              <p className="text-sm text-slate-500">
+                {f.subjects.length} subject{f.subjects.length === 1 ? "" : "s"}
+              </p>
+            </Card>
           ))}
-        </TableBody>
-      </Table>
-      </Card>
+        </div>
+      )}
+
+      {activeFolder && (
+        <>
+          <button
+            onClick={() => setOpenYear(null)}
+            className="mb-3 flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900"
+          >
+            <ArrowLeft className="size-3.5" /> All years
+          </button>
+          <div className="mb-3 flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-slate-900">{activeFolder.year}</h2>
+            <Badge variant="secondary">{activeFolder.subjects.length}</Badge>
+          </div>
+          <Card className="border-slate-200/70 bg-white/70 shadow-sm backdrop-blur-sm">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Code</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Sem</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {activeFolder.subjects.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center text-muted-foreground">
+                      No subjects in {activeFolder.year} yet
+                    </TableCell>
+                  </TableRow>
+                )}
+                {activeFolder.subjects.map((s) => (
+                  <TableRow key={s.id}>
+                    <TableCell>{s.code}</TableCell>
+                    <TableCell>{s.name}</TableCell>
+                    <TableCell>{s.semester}</TableCell>
+                    <TableCell className="text-right">
+                      <Button variant="ghost" size="sm" onClick={() => remove.mutate(s.id)}>
+                        Delete
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
+        </>
+      )}
     </SectionShell>
   )
 }

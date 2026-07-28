@@ -1,17 +1,20 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { UsersRound } from "lucide-react"
+import { ArrowLeft, FolderOpen, UsersRound } from "lucide-react"
 import { supabase } from "@/lib/supabase"
-import type { Database } from "@/types/database"
+import type { Database, YearLevel } from "@/types/database"
 import { SectionShell } from "@/components/section-shell"
 
 type BatchWithTg = Database["public"]["Tables"]["batches"]["Row"] & {
   tg_teacher: { name: string } | null
 }
+
+const YEAR_LEVELS: YearLevel[] = ["FE", "SE", "TE", "BE"]
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
 import {
   Select,
@@ -52,6 +55,9 @@ export default function BatchesPage() {
 
   const [divisionRollRange, setDivisionRollRange] = useState<{ min: number; max: number } | null>(null)
 
+  const [openYear, setOpenYear] = useState<YearLevel | null>(null)
+  const [openDivision, setOpenDivision] = useState<string | null>(null)
+
   const { data: divisions } = useQuery({
     queryKey: ["divisions"],
     queryFn: async () => {
@@ -85,6 +91,25 @@ export default function BatchesPage() {
       return (data ?? []) as unknown as BatchWithTg[]
     },
   })
+
+  const yearFolders = useMemo(
+    () => YEAR_LEVELS.map((y) => ({ year: y, batches: (batches ?? []).filter((b) => b.year_level === y) })),
+    [batches],
+  )
+
+  const divisionFolders = useMemo(() => {
+    if (!openYear) return []
+    const inYear = (batches ?? []).filter((b) => b.year_level === openYear)
+    const letters = [...new Set(inYear.map((b) => b.division))].sort()
+    return letters.map((d) => ({
+      division: d,
+      batches: inYear.filter((b) => b.division === d).sort((a, b) => a.roll_start - b.roll_start),
+    }))
+  }, [batches, openYear])
+
+  const activeBatches = openDivision
+    ? (divisionFolders.find((f) => f.division === openDivision)?.batches ?? [])
+    : []
 
   const create = useMutation({
     mutationFn: async () => {
@@ -273,57 +298,134 @@ export default function BatchesPage() {
         </Dialog>
       }
     >
-      <Card className="border-slate-200/70 bg-white/70 shadow-sm backdrop-blur-sm">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Division</TableHead>
-            <TableHead>Roll range</TableHead>
-            <TableHead>TG</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {isLoading && (
-            <TableRow>
-              <TableCell colSpan={4} className="text-center text-muted-foreground">
-                Loading…
-              </TableCell>
-            </TableRow>
-          )}
-          {batches?.map((b) => (
-            <TableRow key={b.id}>
-              <TableCell>
-                {b.year_level} {b.division} ({b.branch_code}, {b.academic_year})
-              </TableCell>
-              <TableCell>
-                {b.roll_start}–{b.roll_end}
-              </TableCell>
-              <TableCell>{b.tg_teacher?.name}</TableCell>
-              <TableCell className="text-right">
-                <div className="flex justify-end gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setEditTarget(b)
-                      setEditRollStart(String(b.roll_start))
-                      setEditRollEnd(String(b.roll_end))
-                      setEditTgTeacherId(b.tg_teacher_id)
-                    }}
-                  >
-                    Edit
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => remove.mutate(b.id)}>
-                    Delete
-                  </Button>
-                </div>
-              </TableCell>
-            </TableRow>
+      {isLoading && <p className="text-sm text-slate-500">Loading…</p>}
+
+      {!isLoading && !openYear && (
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          {yearFolders.map((f) => (
+            <Card
+              key={f.year}
+              role="button"
+              onClick={() => setOpenYear(f.year)}
+              className="cursor-pointer border-slate-200/70 bg-white/70 p-4 shadow-sm backdrop-blur-sm transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
+            >
+              <div className="mb-2 flex size-9 items-center justify-center rounded-xl bg-blue-100 text-blue-700">
+                <FolderOpen className="size-4.5" />
+              </div>
+              <p className="text-base font-semibold text-slate-900">{f.year}</p>
+              <p className="text-sm text-slate-500">
+                {f.batches.length} batch{f.batches.length === 1 ? "" : "es"}
+              </p>
+            </Card>
           ))}
-        </TableBody>
-      </Table>
-      </Card>
+        </div>
+      )}
+
+      {openYear && !openDivision && (
+        <>
+          <button
+            onClick={() => setOpenYear(null)}
+            className="mb-3 flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900"
+          >
+            <ArrowLeft className="size-3.5" /> All years
+          </button>
+          <div className="mb-3 flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-slate-900">{openYear}</h2>
+          </div>
+          {divisionFolders.length === 0 ? (
+            <p className="text-sm text-slate-500">No batches in {openYear} yet.</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              {divisionFolders.map((f) => (
+                <Card
+                  key={f.division}
+                  role="button"
+                  onClick={() => setOpenDivision(f.division)}
+                  className="cursor-pointer border-slate-200/70 bg-white/70 p-4 shadow-sm backdrop-blur-sm transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
+                >
+                  <div className="mb-2 flex size-9 items-center justify-center rounded-xl bg-blue-100 text-blue-700">
+                    <FolderOpen className="size-4.5" />
+                  </div>
+                  <p className="text-base font-semibold text-slate-900">
+                    {openYear} {f.division}
+                  </p>
+                  <p className="text-sm text-slate-500">
+                    {f.batches.length} batch{f.batches.length === 1 ? "" : "es"}
+                  </p>
+                </Card>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {openDivision && (
+        <>
+          <button
+            onClick={() => setOpenDivision(null)}
+            className="mb-3 flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900"
+          >
+            <ArrowLeft className="size-3.5" /> {openYear} divisions
+          </button>
+          <div className="mb-3 flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-slate-900">
+              {openYear} {openDivision}
+            </h2>
+            <Badge variant="secondary">{activeBatches.length}</Badge>
+          </div>
+          <Card className="border-slate-200/70 bg-white/70 shadow-sm backdrop-blur-sm">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Division</TableHead>
+                  <TableHead>Roll range</TableHead>
+                  <TableHead>TG</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {activeBatches.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center text-muted-foreground">
+                      No batches here yet
+                    </TableCell>
+                  </TableRow>
+                )}
+                {activeBatches.map((b) => (
+                  <TableRow key={b.id}>
+                    <TableCell>
+                      {b.year_level} {b.division} ({b.branch_code}, {b.academic_year})
+                    </TableCell>
+                    <TableCell>
+                      {b.roll_start}–{b.roll_end}
+                    </TableCell>
+                    <TableCell>{b.tg_teacher?.name}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setEditTarget(b)
+                            setEditRollStart(String(b.roll_start))
+                            setEditRollEnd(String(b.roll_end))
+                            setEditTgTeacherId(b.tg_teacher_id)
+                          }}
+                        >
+                          Edit
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => remove.mutate(b.id)}>
+                          Delete
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
+        </>
+      )}
 
       <Dialog open={!!editTarget} onOpenChange={(open) => !open && setEditTarget(null)}>
         <DialogContent>
