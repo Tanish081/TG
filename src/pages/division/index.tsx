@@ -69,6 +69,8 @@ export default function MyDivisionPage() {
   const [addRows, setAddRows] = useState<AddStudentRow[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const [removeTarget, setRemoveTarget] = useState<EnrollmentWithStudent | null>(null)
+
   const { data: divisions } = useQuery({
     queryKey: ["my-divisions", teacher?.id],
     enabled: !!teacher,
@@ -274,6 +276,30 @@ export default function MyDivisionPage() {
     onError: (err: Error) => toast.error(err.message),
   })
 
+  const removeStudent = useMutation({
+    mutationFn: async () => {
+      if (!removeTarget) return
+      // RLS silently deletes 0 rows (no error) if this student isn't one
+      // this teacher created — .select() lets us tell the difference and
+      // surface that as a real error instead of a false-positive success.
+      const { data, error } = await supabase
+        .from("students")
+        .delete()
+        .eq("id", removeTarget.student_id)
+        .select("id")
+      if (error) throw error
+      if (!data || data.length === 0) {
+        throw new Error("You can only remove students you added yourself.")
+      }
+    },
+    onSuccess: () => {
+      toast.success(`Removed ${removeTarget?.student?.name}`)
+      setRemoveTarget(null)
+      queryClient.invalidateQueries({ queryKey: ["my-division-enrollments"] })
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
   if (!divisions || divisions.length === 0) {
     return (
       <SectionShell icon={Layers} title="My division" accent="teal">
@@ -428,9 +454,14 @@ export default function MyDivisionPage() {
                     {pct === null ? "—" : <Badge variant={low ? "destructive" : "secondary"}>{pct}%</Badge>}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button variant="outline" size="sm" onClick={() => setElectiveTarget(e.id)}>
-                      Add to elective
-                    </Button>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" size="sm" onClick={() => setElectiveTarget(e.id)}>
+                        Add to elective
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => setRemoveTarget(e)}>
+                        Remove
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               )
@@ -460,6 +491,28 @@ export default function MyDivisionPage() {
           <DialogFooter>
             <Button onClick={() => addToElective.mutate()} disabled={!electiveCohortId || addToElective.isPending}>
               {addToElective.isPending ? "Adding…" : "Add"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!removeTarget} onOpenChange={(open) => !open && setRemoveTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove {removeTarget?.student?.name}?</DialogTitle>
+            <DialogDescription>
+              Permanently deletes this student and everything tied to them — attendance, marks,
+              elective memberships. This can't be undone. You can only remove students you added
+              yourself; others are protected even if they're in your division.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="destructive"
+              onClick={() => removeStudent.mutate()}
+              disabled={removeStudent.isPending}
+            >
+              {removeStudent.isPending ? "Removing…" : "Remove student"}
             </Button>
           </DialogFooter>
         </DialogContent>

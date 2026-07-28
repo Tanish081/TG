@@ -185,6 +185,15 @@ create policy students_select_class_teacher_own_new on students
     and not exists (select 1 from student_enrollments se where se.student_id = students.id)
   );
 
+-- Scoped to students they personally created (same idea as the insert/
+-- select-own-new policies above) — a class teacher can undo their own
+-- mistakes but can't delete a student another teacher owns, even one
+-- currently enrolled in their division. Deleting cascades to that
+-- student's enrollments, attendance, assessments, everything.
+create policy students_delete_class_teacher_own on students
+  for delete to authenticated
+  using (created_by = auth.uid());
+
 create policy students_select_tg on students
   for select to authenticated
   using (exists (
