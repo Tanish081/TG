@@ -2,6 +2,7 @@ import { Routes, Route } from "react-router-dom"
 import { ProtectedRoute } from "@/components/protected-route"
 import { AppLayout } from "@/components/app-layout"
 import LoginPage from "@/pages/login"
+import SetPasswordPage from "@/pages/set-password"
 import HomePage from "@/pages/home"
 import TeachersPage from "@/pages/admin/teachers"
 import StudentsPage from "@/pages/admin/students"
@@ -22,6 +23,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route element={<ProtectedRoute />}>
+        <Route path="/set-password" element={<SetPasswordPage />} />
         <Route element={<AppLayout />}>
           <Route path="/" element={<HomePage />} />
 

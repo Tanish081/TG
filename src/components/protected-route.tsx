@@ -1,8 +1,9 @@
-import { Navigate, Outlet } from "react-router-dom"
+import { Navigate, Outlet, useLocation } from "react-router-dom"
 import { useAuth } from "@/hooks/use-auth"
 
 export function ProtectedRoute() {
-  const { session, loading } = useAuth()
+  const { session, loading, needsPasswordSetup } = useAuth()
+  const location = useLocation()
 
   if (loading) {
     return (
@@ -13,6 +14,10 @@ export function ProtectedRoute() {
   }
 
   if (!session) return <Navigate to="/login" replace />
+
+  if (needsPasswordSetup && location.pathname !== "/set-password") {
+    return <Navigate to="/set-password" replace />
+  }
 
   return <Outlet />
 }
