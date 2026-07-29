@@ -2,6 +2,7 @@ import { useMemo, useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { Users } from "lucide-react"
+import { FunctionsHttpError } from "@supabase/supabase-js"
 import { supabase } from "@/lib/supabase"
 import type { Database } from "@/types/database"
 import { SectionShell } from "@/components/section-shell"
@@ -29,6 +30,22 @@ import {
 } from "@/components/ui/dialog"
 
 type Teacher = Database["public"]["Tables"]["teachers"]["Row"]
+
+// supabase-js's default FunctionsHttpError.message is just "Edge Function
+// returned a non-2xx status code" — the actual reason is in the response
+// body, which this function's error branches always return as { error }.
+// Without unwrapping it, every failure looks identical and undiagnosable.
+async function invokeTeacherFn(body: Record<string, unknown>) {
+  const { data, error } = await supabase.functions.invoke("invite-teacher", { body })
+  if (error) {
+    if (error instanceof FunctionsHttpError) {
+      const errorBody = await error.context.json().catch(() => null)
+      throw new Error(errorBody?.error ?? error.message)
+    }
+    throw error
+  }
+  return data
+}
 
 export default function TeachersPage() {
   const queryClient = useQueryClient()
@@ -78,10 +95,7 @@ export default function TeachersPage() {
 
   const invite = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.functions.invoke("invite-teacher", {
-        body: { email, name },
-      })
-      if (error) throw error
+      await invokeTeacherFn({ action: "invite", email, name })
     },
     onSuccess: () => {
       toast.success(`Invited ${email}`)
@@ -131,10 +145,7 @@ export default function TeachersPage() {
   const deleteTeacher = useMutation({
     mutationFn: async () => {
       if (!deleteTarget) return
-      const { error } = await supabase.functions.invoke("invite-teacher", {
-        body: { action: "delete", teacherId: deleteTarget.id },
-      })
-      if (error) throw error
+      await invokeTeacherFn({ action: "delete", teacherId: deleteTarget.id })
     },
     onSuccess: () => {
       toast.success(`Deleted ${deleteTarget?.name}`)
@@ -148,10 +159,7 @@ export default function TeachersPage() {
   const setTeacherEmail = useMutation({
     mutationFn: async () => {
       if (!emailTarget) return
-      const { error } = await supabase.functions.invoke("invite-teacher", {
-        body: { action: "set-email", teacherId: emailTarget.id, email: emailValue },
-      })
-      if (error) throw error
+      await invokeTeacherFn({ action: "set-email", teacherId: emailTarget.id, email: emailValue })
     },
     onSuccess: () => {
       toast.success("Email updated — password unchanged")
