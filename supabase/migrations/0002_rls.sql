@@ -14,6 +14,14 @@
 grant usage on schema public to authenticated;
 grant select, insert, update, delete on all tables in schema public to authenticated;
 
+-- Bypassing RLS (service_role's default behavior) and having the base SQL
+-- grant to touch a table are two separate things in Postgres — service_role
+-- still needs this explicitly, or a plain `.from(...).update(...)` as
+-- service_role fails with "permission denied for table X" even though RLS
+-- itself was never the blocker.
+grant usage on schema public to service_role;
+grant select, insert, update, delete on all tables in schema public to service_role;
+
 -- ----------------------------------------------------------------------------
 -- Helper functions (security definer: they read tables that themselves have
 -- RLS enabled, so they must bypass RLS to avoid infinite recursion when used
