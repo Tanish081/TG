@@ -51,7 +51,6 @@ export default function CohortsPage() {
   const [subjectId, setSubjectId] = useState("")
   const [academicYear, setAcademicYear] = useState("2025-26")
   const [label, setLabel] = useState("")
-  const [divisionId, setDivisionId] = useState("")
 
   const [assignOpen, setAssignOpen] = useState(false)
   const [assignCohortId, setAssignCohortId] = useState<string | null>(null)
@@ -97,15 +96,6 @@ export default function CohortsPage() {
     },
   })
 
-  const selectedDivision = divisions?.find((d) => d.id === divisionId)
-  // A core cohort belongs to one division, so its subject must match that
-  // division's year — electives aren't pinned to one division at creation
-  // time, so their subject list stays unfiltered.
-  const availableSubjects =
-    type === "core" && selectedDivision
-      ? subjects?.filter((s) => s.year_level === selectedDivision.year_level)
-      : subjects
-
   const { data: cohorts, isLoading } = useQuery({
     queryKey: ["cohorts-admin"],
     queryFn: async () => {
@@ -120,6 +110,26 @@ export default function CohortsPage() {
 
   const coreCohorts = useMemo(() => (cohorts ?? []).filter((c) => c.type === "core"), [cohorts])
   const electiveCohorts = useMemo(() => (cohorts ?? []).filter((c) => c.type === "elective"), [cohorts])
+
+  // Core cohorts are created one-per-division automatically — a subject
+  // applies to every division that shares its year level, not just one.
+  const selectedSubjectForCreate = subjects?.find((s) => s.id === subjectId)
+  const coreCreatePreview = useMemo(() => {
+    if (type !== "core" || !selectedSubjectForCreate) return []
+    return (divisions ?? [])
+      .filter((d) => d.year_level === selectedSubjectForCreate.year_level)
+      .map((d) => ({
+        division: d,
+        alreadyExists: coreCohorts.some(
+          (c) =>
+            c.subject_id === subjectId &&
+            c.year_level === d.year_level &&
+            c.branch_code === d.branch_code &&
+            c.division === d.division,
+        ),
+      }))
+  }, [type, selectedSubjectForCreate, divisions, coreCohorts, subjectId])
+  const coreCreatePending = coreCreatePreview.filter((p) => !p.alreadyExists)
 
   const yearFolders = useMemo(
     () => YEAR_LEVELS.map((y) => ({ year: y, cohorts: coreCohorts.filter((c) => c.year_level === y) })),
@@ -152,24 +162,52 @@ export default function CohortsPage() {
 
   const create = useMutation({
     mutationFn: async () => {
-      const division = type === "core" ? divisions?.find((d) => d.id === divisionId) : undefined
-
-      const { data: cohort, error } = await supabase
-        .from("cohorts")
-        .insert({
+      if (type === "elective") {
+        const { error } = await supabase.from("cohorts").insert({
           subject_id: subjectId,
           academic_year: academicYear,
-          type,
+          type: "elective",
           label,
-          year_level: division?.year_level ?? null,
-          branch_code: division?.branch_code ?? null,
-          division: division?.division ?? null,
+          year_level: null,
+          branch_code: null,
+          division: null,
         })
+        if (error) throw error
+        return 1
+      }
+
+      // Core: one cohort per division sharing this subject's year level,
+      // each auto-populated with that division's full roster. Divisions
+      // that already have a cohort for this subject are skipped.
+      const subject = selectedSubjectForCreate
+      if (!subject) throw new Error("Pick a subject")
+      const targets = coreCreatePending.map((p) => p.division)
+      if (targets.length === 0) throw new Error("Nothing to create — every matching division already has this cohort")
+
+      const { data: newCohorts, error } = await supabase
+        .from("cohorts")
+        .insert(
+          targets.map((d) => ({
+            subject_id: subjectId,
+            academic_year: academicYear,
+            type: "core" as const,
+            label: `${d.year_level}-${d.division} ${subject.code}`,
+            year_level: d.year_level,
+            branch_code: d.branch_code,
+            division: d.division,
+          })),
+        )
         .select()
-        .single()
       if (error) throw error
 
-      if (division) {
+      for (const cohort of newCohorts ?? []) {
+        const division = targets.find(
+          (d) =>
+            d.year_level === cohort.year_level &&
+            d.branch_code === cohort.branch_code &&
+            d.division === cohort.division,
+        )
+        if (!division) continue
         const { data: enrollments, error: enrollErr } = await supabase
           .from("student_enrollments")
           .select("id")
@@ -185,11 +223,15 @@ export default function CohortsPage() {
           if (memberErr) throw memberErr
         }
       }
+      return targets.length
     },
-    onSuccess: () => {
-      toast.success("Cohort created")
+    onSuccess: (count) => {
+      toast.success(
+        type === "core" ? `Created ${count} cohort${count === 1 ? "" : "s"}` : "Cohort created",
+      )
       setOpen(false)
       setLabel("")
+      setSubjectId("")
       queryClient.invalidateQueries({ queryKey: ["cohorts-admin"] })
     },
     onError: (err: Error) => toast.error(err.message),
@@ -326,28 +368,12 @@ export default function CohortsPage() {
                   Elective
                 </TabsTrigger>
               </TabsList>
-              <TabsContent value="core" className="flex flex-col gap-4">
-                <div className="flex flex-col gap-2">
-                  <Label>Division (whole division becomes the roster)</Label>
-                  <Select
-                    value={divisionId}
-                    onValueChange={(v) => {
-                      setDivisionId(v)
-                      setSubjectId("")
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Pick a division" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {divisions?.map((d) => (
-                        <SelectItem key={d.id} value={d.id}>
-                          {d.year_level} {d.division} ({d.branch_code}, {d.academic_year})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+              <TabsContent value="core">
+                <p className="text-sm text-muted-foreground">
+                  Pick a subject below — a cohort is created automatically for every division that
+                  shares its year level, each pre-filled with that division's full roster. You can
+                  edit any of them individually afterward.
+                </p>
               </TabsContent>
               <TabsContent value="elective">
                 <p className="text-sm text-muted-foreground">
@@ -361,49 +387,77 @@ export default function CohortsPage() {
                 <Label>Subject</Label>
                 <Select value={subjectId} onValueChange={setSubjectId}>
                   <SelectTrigger>
-                    <SelectValue
-                      placeholder={
-                        type === "core" && !selectedDivision
-                          ? "Pick a division first"
-                          : "Pick a subject"
-                      }
-                    />
+                    <SelectValue placeholder="Pick a subject" />
                   </SelectTrigger>
                   <SelectContent>
-                    {availableSubjects?.map((s) => (
+                    {subjects?.map((s) => (
                       <SelectItem key={s.id} value={s.id}>
-                        {s.code} — {s.name}
+                        {s.code} — {s.name} ({s.year_level})
                       </SelectItem>
                     ))}
-                    {availableSubjects?.length === 0 && (
-                      <div className="px-2 py-1.5 text-sm text-muted-foreground">
-                        No {selectedDivision?.year_level} subjects yet
-                      </div>
-                    )}
                   </SelectContent>
                 </Select>
               </div>
+
+              {type === "core" && selectedSubjectForCreate && (
+                <div className="flex flex-col gap-1.5 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+                  <p className="text-xs font-medium text-slate-600">
+                    {coreCreatePending.length} of {coreCreatePreview.length} {selectedSubjectForCreate.year_level}{" "}
+                    division{coreCreatePreview.length === 1 ? "" : "s"} will get a cohort
+                  </p>
+                  {coreCreatePreview.length === 0 ? (
+                    <p className="text-xs text-slate-500">
+                      No {selectedSubjectForCreate.year_level} divisions exist yet.
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {coreCreatePreview.map((p) => (
+                        <Badge
+                          key={p.division.id}
+                          variant={p.alreadyExists ? "secondary" : "outline"}
+                          className={p.alreadyExists ? "opacity-60" : "border-blue-300 text-blue-700"}
+                        >
+                          {p.division.division}
+                          {p.alreadyExists ? " (exists)" : ""}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="flex flex-col gap-2">
                   <Label>Academic year</Label>
                   <Input value={academicYear} onChange={(e) => setAcademicYear(e.target.value)} />
                 </div>
-                <div className="flex flex-col gap-2">
-                  <Label>Label</Label>
-                  <Input
-                    placeholder="e.g. SE-A Data Structures"
-                    value={label}
-                    onChange={(e) => setLabel(e.target.value)}
-                  />
-                </div>
+                {type === "elective" && (
+                  <div className="flex flex-col gap-2">
+                    <Label>Label</Label>
+                    <Input
+                      placeholder="e.g. Competitive Programming"
+                      value={label}
+                      onChange={(e) => setLabel(e.target.value)}
+                    />
+                  </div>
+                )}
               </div>
             </div>
             <DialogFooter>
               <Button
                 onClick={() => create.mutate()}
-                disabled={!subjectId || !label || (type === "core" && !divisionId) || create.isPending}
+                disabled={
+                  !subjectId ||
+                  (type === "elective" && !label) ||
+                  (type === "core" && coreCreatePending.length === 0) ||
+                  create.isPending
+                }
               >
-                {create.isPending ? "Saving…" : "Save"}
+                {create.isPending
+                  ? "Saving…"
+                  : type === "core"
+                    ? `Create ${coreCreatePending.length || ""} cohort${coreCreatePending.length === 1 ? "" : "s"}`
+                    : "Save"}
               </Button>
             </DialogFooter>
           </DialogContent>
