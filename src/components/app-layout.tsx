@@ -1,3 +1,4 @@
+import { useState, type FormEvent } from "react"
 import { Outlet, NavLink, useLocation } from "react-router-dom"
 import {
   GraduationCap,
@@ -11,8 +12,10 @@ import {
   LogOut,
   BarChart3,
   ShieldCheck,
+  KeyRound,
   type LucideIcon,
 } from "lucide-react"
+import { toast } from "sonner"
 import { useAuth } from "@/hooks/use-auth"
 import { useRoles, type Roles } from "@/hooks/use-roles"
 import {
@@ -31,8 +34,18 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 
 interface NavItem {
@@ -91,10 +104,94 @@ function initials(name: string) {
     .toUpperCase()
 }
 
+function ChangePasswordDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const { updatePassword } = useAuth()
+  const [password, setPassword] = useState("")
+  const [confirm, setConfirm] = useState("")
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    setError(null)
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters")
+      return
+    }
+    if (password !== confirm) {
+      setError("Passwords don't match")
+      return
+    }
+    setSubmitting(true)
+    const { error } = await updatePassword(password)
+    setSubmitting(false)
+    if (error) {
+      setError(error)
+      return
+    }
+    toast.success("Password changed")
+    setPassword("")
+    setConfirm("")
+    onOpenChange(false)
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        onOpenChange(next)
+        if (!next) {
+          setPassword("")
+          setConfirm("")
+          setError(null)
+        }
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Change password</DialogTitle>
+          <DialogDescription>Takes effect immediately for this account.</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="cp-new">New password</Label>
+            <Input
+              id="cp-new"
+              type="password"
+              autoComplete="new-password"
+              minLength={8}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="cp-confirm">Confirm password</Label>
+            <Input
+              id="cp-confirm"
+              type="password"
+              autoComplete="new-password"
+              minLength={8}
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+            />
+          </div>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <DialogFooter>
+            <Button type="submit" disabled={submitting}>
+              {submitting ? "Saving…" : "Change password"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function AppLayout() {
   const { teacher, signOut } = useAuth()
   const { data: roles } = useRoles()
   const location = useLocation()
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false)
 
   const currentLabel = NAV_SECTIONS.flatMap((s) => s.items).find((item) =>
     location.pathname === item.to || location.pathname.startsWith(item.to + "/"),
@@ -160,12 +257,21 @@ export function AppLayout() {
               <p className="truncate text-sm font-medium">{teacher?.name}</p>
               <p className="truncate text-xs text-muted-foreground">{teacher?.email}</p>
             </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setChangePasswordOpen(true)}
+              title="Change password"
+            >
+              <KeyRound className="size-4" />
+            </Button>
             <Button variant="ghost" size="icon" onClick={() => signOut()} title="Sign out">
               <LogOut className="size-4" />
             </Button>
           </div>
         </SidebarFooter>
       </Sidebar>
+      <ChangePasswordDialog open={changePasswordOpen} onOpenChange={setChangePasswordOpen} />
       <SidebarInset>
         <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4">
           <SidebarTrigger />

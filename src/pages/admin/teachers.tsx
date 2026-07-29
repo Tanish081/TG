@@ -41,6 +41,9 @@ export default function TeachersPage() {
 
   const [deleteTarget, setDeleteTarget] = useState<Teacher | null>(null)
 
+  const [emailTarget, setEmailTarget] = useState<Teacher | null>(null)
+  const [emailValue, setEmailValue] = useState("")
+
   const { data: teachers, isLoading } = useQuery({
     queryKey: ["teachers"],
     queryFn: async () => {
@@ -138,6 +141,23 @@ export default function TeachersPage() {
       setDeleteTarget(null)
       queryClient.invalidateQueries({ queryKey: ["teachers"] })
       queryClient.invalidateQueries({ queryKey: ["divisions"] })
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const setTeacherEmail = useMutation({
+    mutationFn: async () => {
+      if (!emailTarget) return
+      const { error } = await supabase.functions.invoke("invite-teacher", {
+        body: { action: "set-email", teacherId: emailTarget.id, email: emailValue },
+      })
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success("Email updated — password unchanged")
+      setEmailTarget(null)
+      setEmailValue("")
+      queryClient.invalidateQueries({ queryKey: ["teachers"] })
     },
     onError: (err: Error) => toast.error(err.message),
   })
@@ -247,6 +267,16 @@ export default function TeachersPage() {
                     <Button
                       variant="outline"
                       size="sm"
+                      onClick={() => {
+                        setEmailTarget(t)
+                        setEmailValue("")
+                      }}
+                    >
+                      Set email
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
                       onClick={() =>
                         toggleDeptCoordinator.mutate({
                           id: t.id,
@@ -291,6 +321,43 @@ export default function TeachersPage() {
           <DialogFooter>
             <Button onClick={() => rename.mutate()} disabled={!renameValue || rename.isPending}>
               {rename.isPending ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!emailTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEmailTarget(null)
+            setEmailValue("")
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Set email — {emailTarget?.name}</DialogTitle>
+            <DialogDescription>
+              Changes their login email only — the password stays exactly as it is now, so your
+              existing login for this account keeps working until you hand it off.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="set-email-input">Email</Label>
+            <Input
+              id="set-email-input"
+              type="email"
+              value={emailValue}
+              onChange={(e) => setEmailValue(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => setTeacherEmail.mutate()}
+              disabled={!emailValue || setTeacherEmail.isPending}
+            >
+              {setTeacherEmail.isPending ? "Saving…" : "Save email"}
             </Button>
           </DialogFooter>
         </DialogContent>

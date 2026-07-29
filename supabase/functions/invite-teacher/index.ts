@@ -1,15 +1,21 @@
 // Edge Function: invite-teacher
 //
-// Two actions, both gated to the Dept Coordinator (verified below using the
+// Three actions, all gated to the Dept Coordinator (verified below using the
 // caller's own JWT before switching to the service-role client):
 //
-//   invite   — creates a new teacher's auth account (which triggers the
-//              `teachers` row via on_auth_user_created) and emails them a
-//              set-password invite. This is the default action.
-//   delete   — removes a teacher's auth account entirely. `teachers.id`
-//              references `auth.users.id` with `on delete cascade`, so this
-//              also removes their `teachers` row and anything that
-//              cascades from it.
+//   invite     — creates a new teacher's auth account (which triggers the
+//                `teachers` row via on_auth_user_created) and emails them a
+//                set-password invite. This is the default action.
+//   delete     — removes a teacher's auth account entirely. `teachers.id`
+//                references `auth.users.id` with `on delete cascade`, so
+//                this also removes their `teachers` row and anything that
+//                cascades from it.
+//   set-email  — replaces a teacher's login email (e.g. swapping a
+//                placeholder for their real one). Deliberately does NOT
+//                touch their password — the Coordinator keeps using
+//                whatever password they already know until they hand the
+//                account off, at which point the teacher can change it
+//                themselves from inside the app.
 //
 // Requires the service-role key, so this cannot run on the client (§1).
 //
@@ -98,6 +104,29 @@ Deno.serve(async (req) => {
     const { error } = await adminClient.auth.admin.deleteUser(teacherId)
     if (error) {
       return new Response(JSON.stringify({ error: error.message }), { status: 400, headers: jsonHeaders })
+    }
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: jsonHeaders })
+  }
+
+  if (action === "set-email") {
+    const { teacherId, email } = body
+    if (!teacherId || typeof teacherId !== "string" || !email || typeof email !== "string") {
+      return new Response(JSON.stringify({ error: "teacherId and email are required" }), {
+        status: 400,
+        headers: jsonHeaders,
+      })
+    }
+    // No password field passed here — updateUserById leaves it untouched.
+    const { error: updateErr } = await adminClient.auth.admin.updateUserById(teacherId, {
+      email,
+      email_confirm: true,
+    })
+    if (updateErr) {
+      return new Response(JSON.stringify({ error: updateErr.message }), { status: 400, headers: jsonHeaders })
+    }
+    const { error: syncErr } = await adminClient.from("teachers").update({ email }).eq("id", teacherId)
+    if (syncErr) {
+      return new Response(JSON.stringify({ error: syncErr.message }), { status: 400, headers: jsonHeaders })
     }
     return new Response(JSON.stringify({ ok: true }), { status: 200, headers: jsonHeaders })
   }
