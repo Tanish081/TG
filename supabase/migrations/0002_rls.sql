@@ -306,6 +306,15 @@ create policy cohorts_select_class_teacher on cohorts
     where cm.cohort_id = cohorts.id and is_class_teacher_of_enrollment(cm.enrollment_id)
   ));
 
+-- Electives start with zero members (each class teacher opts their own
+-- students in from "My division") — the policy above can never match a
+-- brand-new elective, since it requires an existing member to key off.
+-- Electives aren't scoped to one division by design, so any class teacher
+-- can see all of them, full stop, rather than trying to scope by membership.
+create policy cohorts_select_elective_class_teacher on cohorts
+  for select to authenticated
+  using (type = 'elective' and is_class_teacher());
+
 create policy cohorts_select_tg on cohorts
   for select to authenticated
   using (exists (

@@ -18,14 +18,34 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2"
 
+// Browsers preflight cross-origin POSTs that carry an Authorization header
+// with an OPTIONS request — without these headers on every response
+// (including the OPTIONS one), the preflight fails and the browser never
+// even sends the real request. Surfaces client-side as "Failed to send a
+// request to the Edge Function", not as anything from this function's own
+// logic, which makes it easy to misdiagnose as an auth or logic bug.
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+}
+const jsonHeaders = { ...corsHeaders, "Content-Type": "application/json" }
+
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders })
+  }
+
   if (req.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 })
+    return new Response("Method not allowed", { status: 405, headers: corsHeaders })
   }
 
   const authHeader = req.headers.get("Authorization")
   if (!authHeader) {
-    return new Response(JSON.stringify({ error: "Missing Authorization header" }), { status: 401 })
+    return new Response(JSON.stringify({ error: "Missing Authorization header" }), {
+      status: 401,
+      headers: corsHeaders,
+    })
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!
@@ -41,7 +61,7 @@ Deno.serve(async (req) => {
     data: { user },
   } = await callerClient.auth.getUser()
   if (!user) {
-    return new Response(JSON.stringify({ error: "Not authenticated" }), { status: 401 })
+    return new Response(JSON.stringify({ error: "Not authenticated" }), { status: 401, headers: jsonHeaders })
   }
 
   const { data: callerTeacher } = await callerClient
@@ -53,6 +73,7 @@ Deno.serve(async (req) => {
   if (!callerTeacher?.is_dept_coordinator) {
     return new Response(JSON.stringify({ error: "Only a Dept Coordinator can manage teachers" }), {
       status: 403,
+      headers: jsonHeaders,
     })
   }
 
@@ -63,24 +84,27 @@ Deno.serve(async (req) => {
   if (action === "delete") {
     const { teacherId } = body
     if (!teacherId || typeof teacherId !== "string") {
-      return new Response(JSON.stringify({ error: "teacherId is required" }), { status: 400 })
+      return new Response(JSON.stringify({ error: "teacherId is required" }), {
+        status: 400,
+        headers: jsonHeaders,
+      })
     }
     if (teacherId === user.id) {
       return new Response(JSON.stringify({ error: "You can't delete your own account" }), {
         status: 400,
+        headers: jsonHeaders,
       })
     }
     const { error } = await adminClient.auth.admin.deleteUser(teacherId)
-    if (error) return new Response(JSON.stringify({ error: error.message }), { status: 400 })
-    return new Response(JSON.stringify({ ok: true }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    })
+    if (error) {
+      return new Response(JSON.stringify({ error: error.message }), { status: 400, headers: jsonHeaders })
+    }
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: jsonHeaders })
   }
 
   const { email, name } = body
   if (!email || typeof email !== "string") {
-    return new Response(JSON.stringify({ error: "email is required" }), { status: 400 })
+    return new Response(JSON.stringify({ error: "email is required" }), { status: 400, headers: jsonHeaders })
   }
 
   const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email, {
@@ -88,11 +112,8 @@ Deno.serve(async (req) => {
   })
 
   if (error) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 400 })
+    return new Response(JSON.stringify({ error: error.message }), { status: 400, headers: jsonHeaders })
   }
 
-  return new Response(JSON.stringify({ user: data.user }), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  })
+  return new Response(JSON.stringify({ user: data.user }), { status: 200, headers: jsonHeaders })
 })

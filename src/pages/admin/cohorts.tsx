@@ -9,10 +9,12 @@ import { SectionShell } from "@/components/section-shell"
 const YEAR_LEVELS: YearLevel[] = ["FE", "SE", "TE", "BE"]
 
 type CohortWithDetails = Database["public"]["Tables"]["cohorts"]["Row"] & {
-  subject: { code: string; name: string } | null
+  subject: { code: string; name: string; year_level: YearLevel } | null
   cohort_members: { count: number }[]
   teaching_assignments: { id: string; teacher_id: string; teacher: { name: string } | null } | null
 }
+
+const ELECTIVE_FOLDER = "__elective__"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -66,7 +68,7 @@ export default function CohortsPage() {
 
   const [deleteTarget, setDeleteTarget] = useState<CohortWithDetails | null>(null)
 
-  const [openYear, setOpenYear] = useState<YearLevel | "elective" | null>(null)
+  const [openYear, setOpenYear] = useState<YearLevel | null>(null)
   const [openDivision, setOpenDivision] = useState<string | null>(null)
 
   const { data: subjects } = useQuery({
@@ -101,7 +103,7 @@ export default function CohortsPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("cohorts")
-        .select("*, subject:subjects(code, name), cohort_members(count), teaching_assignments(id, teacher_id, teacher:teachers(name))")
+        .select("*, subject:subjects(code, name, year_level), cohort_members(count), teaching_assignments(id, teacher_id, teacher:teachers(name))")
         .order("academic_year", { ascending: false })
       if (error) throw error
       return (data ?? []) as unknown as CohortWithDetails[]
@@ -132,12 +134,19 @@ export default function CohortsPage() {
   const coreCreatePending = coreCreatePreview.filter((p) => !p.alreadyExists)
 
   const yearFolders = useMemo(
-    () => YEAR_LEVELS.map((y) => ({ year: y, cohorts: coreCohorts.filter((c) => c.year_level === y) })),
-    [coreCohorts],
+    () =>
+      YEAR_LEVELS.map((y) => ({
+        year: y,
+        cohorts: coreCohorts.filter((c) => c.year_level === y),
+        electives: electiveCohorts.filter((c) => c.subject?.year_level === y),
+      })),
+    [coreCohorts, electiveCohorts],
   )
 
+  const openYearFolder = yearFolders.find((f) => f.year === openYear)
+
   const divisionFolders = useMemo(() => {
-    if (!openYear || openYear === "elective") return []
+    if (!openYear) return []
     const inYear = coreCohorts.filter((c) => c.year_level === openYear)
     const letters = [...new Set(inYear.map((c) => c.division).filter((d): d is string => !!d))].sort()
     return letters.map((d) => ({
@@ -147,8 +156,8 @@ export default function CohortsPage() {
   }, [coreCohorts, openYear])
 
   const activeCohorts =
-    openYear === "elective"
-      ? electiveCohorts
+    openDivision === ELECTIVE_FOLDER
+      ? (openYearFolder?.electives ?? [])
       : openDivision
         ? (divisionFolders.find((f) => f.division === openDivision)?.cohorts ?? [])
         : []
@@ -480,27 +489,14 @@ export default function CohortsPage() {
               </div>
               <p className="text-base font-semibold text-slate-900">{f.year}</p>
               <p className="text-sm text-slate-500">
-                {f.cohorts.length} core cohort{f.cohorts.length === 1 ? "" : "s"}
+                {f.cohorts.length} core · {f.electives.length} elective
               </p>
             </Card>
           ))}
-          <Card
-            role="button"
-            onClick={() => setOpenYear("elective")}
-            className="cursor-pointer border-slate-200/70 bg-white/70 p-4 shadow-sm backdrop-blur-sm transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
-          >
-            <div className="mb-2 flex size-9 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
-              <Shuffle className="size-4.5" />
-            </div>
-            <p className="text-base font-semibold text-slate-900">Elective</p>
-            <p className="text-sm text-slate-500">
-              {electiveCohorts.length} cohort{electiveCohorts.length === 1 ? "" : "s"}
-            </p>
-          </Card>
         </div>
       )}
 
-      {openYear && openYear !== "elective" && !openDivision && (
+      {openYear && !openDivision && (
         <>
           <button
             onClick={() => setOpenYear(null)}
@@ -511,8 +507,8 @@ export default function CohortsPage() {
           <div className="mb-3 flex items-center gap-2">
             <h2 className="text-lg font-semibold text-slate-900">{openYear}</h2>
           </div>
-          {divisionFolders.length === 0 ? (
-            <p className="text-sm text-slate-500">No core cohorts in {openYear} yet.</p>
+          {divisionFolders.length === 0 && (openYearFolder?.electives.length ?? 0) === 0 ? (
+            <p className="text-sm text-slate-500">No cohorts in {openYear} yet.</p>
           ) : (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
               {divisionFolders.map((f) => (
@@ -533,23 +529,37 @@ export default function CohortsPage() {
                   </p>
                 </Card>
               ))}
+              {(openYearFolder?.electives.length ?? 0) > 0 && (
+                <Card
+                  role="button"
+                  onClick={() => setOpenDivision(ELECTIVE_FOLDER)}
+                  className="cursor-pointer border-slate-200/70 bg-white/70 p-4 shadow-sm backdrop-blur-sm transition-all hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-md"
+                >
+                  <div className="mb-2 flex size-9 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
+                    <Shuffle className="size-4.5" />
+                  </div>
+                  <p className="text-base font-semibold text-slate-900">{openYear} Elective</p>
+                  <p className="text-sm text-slate-500">
+                    {openYearFolder?.electives.length} cohort{openYearFolder?.electives.length === 1 ? "" : "s"}
+                  </p>
+                </Card>
+              )}
             </div>
           )}
         </>
       )}
 
-      {(openDivision || openYear === "elective") && (
+      {openDivision && (
         <>
           <button
-            onClick={() => (openYear === "elective" ? setOpenYear(null) : setOpenDivision(null))}
+            onClick={() => setOpenDivision(null)}
             className="mb-3 flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900"
           >
-            <ArrowLeft className="size-3.5" />
-            {openYear === "elective" ? "All years" : `${openYear} divisions`}
+            <ArrowLeft className="size-3.5" /> {openYear} folders
           </button>
           <div className="mb-3 flex items-center gap-2">
             <h2 className="text-lg font-semibold text-slate-900">
-              {openYear === "elective" ? "Elective" : `${openYear} ${openDivision}`}
+              {openDivision === ELECTIVE_FOLDER ? `${openYear} Elective` : `${openYear} ${openDivision}`}
             </h2>
             <Badge variant="secondary">{activeCohorts.length}</Badge>
           </div>
