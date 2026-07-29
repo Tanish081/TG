@@ -93,6 +93,21 @@ export default function SubjectsPage() {
 
   const remove = useMutation({
     mutationFn: async (id: string) => {
+      // cohorts.subject_id cascades on delete, so deleting a subject with
+      // cohorts would silently wipe them (and their attendance/members) —
+      // block it with a clear reason instead of letting that happen, or of
+      // surfacing the raw foreign-key error that attendance_sessions.subject_id
+      // (which doesn't cascade) would throw once any session exists.
+      const { count, error: countErr } = await supabase
+        .from("cohorts")
+        .select("id", { count: "exact", head: true })
+        .eq("subject_id", id)
+      if (countErr) throw countErr
+      if (count && count > 0) {
+        throw new Error(
+          `Can't delete — ${count} cohort${count === 1 ? "" : "s"} still use${count === 1 ? "s" : ""} this subject. Delete those cohorts first.`,
+        )
+      }
       const { error } = await supabase.from("subjects").delete().eq("id", id)
       if (error) throw error
     },

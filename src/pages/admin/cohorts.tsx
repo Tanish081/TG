@@ -65,6 +65,8 @@ export default function CohortsPage() {
   const [editSubjectId, setEditSubjectId] = useState("")
   const [editAcademicYear, setEditAcademicYear] = useState("")
 
+  const [deleteTarget, setDeleteTarget] = useState<CohortWithDetails | null>(null)
+
   const [openYear, setOpenYear] = useState<YearLevel | "elective" | null>(null)
   const [openDivision, setOpenDivision] = useState<string | null>(null)
 
@@ -276,6 +278,19 @@ export default function CohortsPage() {
     onSuccess: () => {
       toast.success("Cohort updated")
       setEditTarget(null)
+      queryClient.invalidateQueries({ queryKey: ["cohorts-admin"] })
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const remove = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("cohorts").delete().eq("id", id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success("Cohort deleted")
+      setDeleteTarget(null)
       queryClient.invalidateQueries({ queryKey: ["cohorts-admin"] })
     },
     onError: (err: Error) => toast.error(err.message),
@@ -557,6 +572,9 @@ export default function CohortsPage() {
                         >
                           {c.teaching_assignments ? "Reassign teacher" : "Assign teacher"}
                         </Button>
+                        <Button variant="ghost" size="sm" onClick={() => setDeleteTarget(c)}>
+                          Delete
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -668,6 +686,28 @@ export default function CohortsPage() {
               disabled={!editLabel || !editSubjectId || !editAcademicYear || edit.isPending}
             >
               {edit.isPending ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete {deleteTarget?.label}?</DialogTitle>
+            <DialogDescription>
+              Also deletes its {deleteTarget?.cohort_members?.[0]?.count ?? 0} member
+              {deleteTarget?.cohort_members?.[0]?.count === 1 ? "" : "s"} and any attendance already
+              recorded for it. This can't be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="destructive"
+              onClick={() => deleteTarget && remove.mutate(deleteTarget.id)}
+              disabled={remove.isPending}
+            >
+              {remove.isPending ? "Deleting…" : "Delete cohort"}
             </Button>
           </DialogFooter>
         </DialogContent>
