@@ -1,14 +1,16 @@
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
-import { FlameKindling, UsersRound, AlertTriangle, Award, Users } from "lucide-react"
+import { FlameKindling, UsersRound, AlertTriangle, Award, Users, FileDown } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/hooks/use-auth"
 import { computeDailyAttendance, currentAbsenceStreak, ABSENCE_FLAG_THRESHOLD } from "@/lib/attendance-daily"
+import { generateWeeklyReportPdf } from "@/lib/weekly-report"
 import { displayRoll } from "@/lib/roll-code"
 import { cn } from "@/lib/utils"
 import { SectionShell } from "@/components/section-shell"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Table,
   TableBody,
@@ -166,6 +168,64 @@ export default function TgDashboardPage() {
     return map
   }, [semesterResults])
 
+  // Rolling 7-day window ending today — same definition used for the "last
+  // 7 working days" heatmap on the student detail page, so "this week" means
+  // the same thing everywhere in the app.
+  const weekRange = useMemo(() => {
+    const end = new Date()
+    const start = new Date()
+    start.setDate(start.getDate() - 6)
+    const toISO = (d: Date) => d.toISOString().slice(0, 10)
+    return { start: toISO(start), end: toISO(end) }
+  }, [])
+
+  const weeklyAttendanceByEnrollment = useMemo(() => {
+    const map = new Map<string, { present: number; total: number }>()
+    for (const r of attendance ?? []) {
+      if (!r.session || r.session.date < weekRange.start || r.session.date > weekRange.end) continue
+      const entry = map.get(r.enrollment_id) ?? { present: 0, total: 0 }
+      entry.total += 1
+      if (r.status === "present" || r.status === "late") entry.present += 1
+      map.set(r.enrollment_id, entry)
+    }
+    return map
+  }, [attendance, weekRange])
+
+  const [reportPending, setReportPending] = useState(false)
+
+  async function handleDownloadReport() {
+    if (!enrollments || !batches) return
+    const rows = enrollments
+      .slice()
+      .sort((a, b) => a.roll_seq - b.roll_seq)
+      .map((e) => {
+        const overall = attendanceByEnrollment.get(e.id)
+        const weekly = weeklyAttendanceByEnrollment.get(e.id) ?? { present: 0, total: 0 }
+        return {
+          roll: displayRoll(e),
+          name: e.student?.name ?? "—",
+          weeklyPresent: weekly.present,
+          weeklyTotal: weekly.total,
+          overallPct: overall && overall.total > 0 ? (overall.present / overall.total) * 100 : null,
+          sgpa: latestGpaByEnrollment.get(e.id) ?? null,
+          absenceStreak: streakByEnrollment.get(e.id) ?? 0,
+        }
+      })
+    setReportPending(true)
+    try {
+      await generateWeeklyReportPdf({
+        batchLabel: batches.map((b) => `${b.year_level}${b.division} ${b.roll_start}-${b.roll_end}`).join(", "),
+        tgName: teacher?.name ?? "—",
+        rangeStart: weekRange.start,
+        rangeEnd: weekRange.end,
+        rows,
+        absenceFlagThreshold: ABSENCE_FLAG_THRESHOLD,
+      })
+    } finally {
+      setReportPending(false)
+    }
+  }
+
   const flaggedCount = [...streakByEnrollment.values()].filter((s) => s >= ABSENCE_FLAG_THRESHOLD).length
   const lowAttendanceCount = (enrollments ?? []).filter((e) => {
     const a = attendanceByEnrollment.get(e.id)
@@ -192,6 +252,11 @@ export default function TgDashboardPage() {
       title="My TG group"
       subtitle={batches.map((b) => `${b.year_level}${b.division} ${b.roll_start}-${b.roll_end}`).join(", ")}
       accent="teal"
+      action={
+        <Button variant="outline" onClick={handleDownloadReport} disabled={!enrollments?.length || reportPending}>
+          <FileDown className="size-4" /> {reportPending ? "Generating…" : "Download weekly report"}
+        </Button>
+      }
     >
       <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatTile icon={Users} iconClassName="bg-teal-100 text-teal-700" label="Students" value={String(enrollments?.length ?? 0)} />
