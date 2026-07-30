@@ -54,6 +54,8 @@ const TEAL: RGB = [13, 108, 101]
 const TEAL_BG: RGB = [235, 249, 247]
 const EMPTY_CELL: RGB = [235, 238, 242]
 const WHITE: RGB = [255, 255, 255]
+const OVERALL_BG: RGB = [255, 244, 199]
+const OVERALL_TEXT: RGB = [146, 100, 6]
 const DAY_LETTERS = ["M", "T", "W", "T", "F", "S"]
 
 /** Full-present -> green, zero-present -> red, partial (some sessions
@@ -202,8 +204,13 @@ export async function generateWeeklyReportPdf(params: WeeklyReportParams) {
       columnStyles: { 0: { halign: "left", fontStyle: "bold", cellWidth: 50 } },
       didParseCell: (data) => {
         if (data.section !== "body") return
+        const isOverallRow = data.row.index === rows.length - 1
         if (data.column.index === 0) {
           data.cell.styles.fontSize = 8
+          if (isOverallRow) {
+            data.cell.styles.fillColor = OVERALL_BG as unknown as [number, number, number]
+            data.cell.styles.textColor = OVERALL_TEXT as unknown as [number, number, number]
+          }
           return
         }
         const m = meta[data.row.index][data.column.index - 1]
@@ -421,8 +428,8 @@ export async function generateWeeklyReportPdf(params: WeeklyReportParams) {
       tableY + 6,
       rangeStart,
       [
-        { label: "Overall", sublabel: null, daily: student.weekDaily },
         ...student.subjects.map((s) => ({ label: s.code, sublabel: s.name, daily: s.daily })),
+        { label: "Overall", sublabel: null, daily: student.weekDaily },
       ],
       student.roll,
     )
