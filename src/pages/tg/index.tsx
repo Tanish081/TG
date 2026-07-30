@@ -4,7 +4,12 @@ import { Link } from "react-router-dom"
 import { FlameKindling, UsersRound, AlertTriangle, Award, Users, FileDown } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/hooks/use-auth"
-import { computeDailyAttendance, currentAbsenceStreak, ABSENCE_FLAG_THRESHOLD } from "@/lib/attendance-daily"
+import {
+  computeDailyAttendance,
+  currentAbsenceStreak,
+  ABSENCE_FLAG_THRESHOLD,
+  type DailyAttendance,
+} from "@/lib/attendance-daily"
 import { generateWeeklyReportPdf } from "@/lib/weekly-report"
 import { displayRoll } from "@/lib/roll-code"
 import { cn } from "@/lib/utils"
@@ -167,7 +172,10 @@ export default function TgDashboardPage() {
     return map
   }, [attendance])
 
-  const streakByEnrollment = useMemo(() => {
+  // Full (all-time) day-by-day attendance per student, combined across
+  // subjects — feeds both the absence-streak count and the "Overall"
+  // streak calendar in the PDF report.
+  const dailyByEnrollment = useMemo(() => {
     const byEnrollment = new Map<string, { status: string; date: string }[]>()
     for (const r of attendance ?? []) {
       if (!r.session) continue
@@ -175,11 +183,37 @@ export default function TgDashboardPage() {
       list.push({ status: r.status, date: r.session.date })
       byEnrollment.set(r.enrollment_id, list)
     }
-    const map = new Map<string, number>()
-    for (const [id, records] of byEnrollment) {
-      map.set(id, currentAbsenceStreak(computeDailyAttendance(records)))
-    }
+    const map = new Map<string, DailyAttendance[]>()
+    for (const [id, records] of byEnrollment) map.set(id, computeDailyAttendance(records))
     return map
+  }, [attendance])
+
+  const streakByEnrollment = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const [id, daily] of dailyByEnrollment) map.set(id, currentAbsenceStreak(daily))
+    return map
+  }, [dailyByEnrollment])
+
+  // Same idea, but split per subject — powers each subject's own streak
+  // calendar in the PDF report.
+  const subjectDailyByEnrollment = useMemo(() => {
+    const byEnrollmentSubject = new Map<string, Map<string, { status: string; date: string }[]>>()
+    for (const r of attendance ?? []) {
+      if (!r.session?.subject) continue
+      const subj = r.session.subject
+      const m = byEnrollmentSubject.get(r.enrollment_id) ?? new Map<string, { status: string; date: string }[]>()
+      const list = m.get(subj.code) ?? []
+      list.push({ status: r.status, date: r.session.date })
+      m.set(subj.code, list)
+      byEnrollmentSubject.set(r.enrollment_id, m)
+    }
+    const result = new Map<string, Map<string, DailyAttendance[]>>()
+    for (const [enrollId, subjMap] of byEnrollmentSubject) {
+      const converted = new Map<string, DailyAttendance[]>()
+      for (const [code, records] of subjMap) converted.set(code, computeDailyAttendance(records))
+      result.set(enrollId, converted)
+    }
+    return result
   }, [attendance])
 
   const latestGpaByEnrollment = useMemo(() => {
@@ -225,22 +259,6 @@ export default function TgDashboardPage() {
     return map
   }, [cohortSubjects])
 
-  const weeklySubjectByEnrollment = useMemo(() => {
-    const map = new Map<string, Map<string, { present: number; total: number }>>()
-    for (const r of attendance ?? []) {
-      if (!r.session || r.session.date < weekRange.start || r.session.date > weekRange.end) continue
-      const subj = r.session.subject
-      if (!subj) continue
-      const m = map.get(r.enrollment_id) ?? new Map<string, { present: number; total: number }>()
-      const entry = m.get(subj.code) ?? { present: 0, total: 0 }
-      entry.total += 1
-      if (r.status === "present" || r.status === "late") entry.present += 1
-      m.set(subj.code, entry)
-      map.set(r.enrollment_id, m)
-    }
-    return map
-  }, [attendance, weekRange])
-
   const [reportPending, setReportPending] = useState(false)
 
   async function handleDownloadReport() {
@@ -252,13 +270,14 @@ export default function TgDashboardPage() {
         const overall = attendanceByEnrollment.get(e.id) ?? { present: 0, total: 0 }
         const weekly = weeklyAttendanceByEnrollment.get(e.id) ?? { present: 0, total: 0 }
         const subjectNames = subjectsByEnrollment.get(e.id) ?? new Map<string, string>()
-        const weeklyBySubject = weeklySubjectByEnrollment.get(e.id) ?? new Map()
+        const subjectDaily = subjectDailyByEnrollment.get(e.id) ?? new Map<string, DailyAttendance[]>()
         const subjects = [...subjectNames.entries()]
           .sort(([a], [b]) => a.localeCompare(b))
-          .map(([code, name]) => {
-            const s = weeklyBySubject.get(code) ?? { present: 0, total: 0 }
-            return { code, name, present: s.present, total: s.total }
-          })
+          .map(([code, name]) => ({
+            code,
+            name,
+            daily: (subjectDaily.get(code) ?? []).map((d) => ({ date: d.date, present: d.present > 0 })),
+          }))
         return {
           roll: displayRoll(e),
           name: e.student?.name ?? "—",
@@ -267,8 +286,8 @@ export default function TgDashboardPage() {
           weeklyTotal: weekly.total,
           overallPresent: overall.present,
           overallTotal: overall.total,
-          sgpa: latestGpaByEnrollment.get(e.id) ?? null,
           absenceStreak: streakByEnrollment.get(e.id) ?? 0,
+          overallDaily: (dailyByEnrollment.get(e.id) ?? []).map((d) => ({ date: d.date, present: d.present > 0 })),
           subjects,
         }
       })
@@ -282,6 +301,7 @@ export default function TgDashboardPage() {
         rangeEnd: weekRange.end,
         students,
         absenceFlagThreshold: ABSENCE_FLAG_THRESHOLD,
+        lowAttendanceThreshold: LOW_ATTENDANCE_THRESHOLD,
       })
     } finally {
       setReportPending(false)
