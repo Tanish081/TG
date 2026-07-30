@@ -274,12 +274,13 @@ export default function TgDashboardPage() {
         const weekly = weeklyAttendanceByEnrollment.get(e.id) ?? { present: 0, total: 0 }
         const subjectNames = subjectsByEnrollment.get(e.id) ?? new Map<string, string>()
         const subjectDaily = subjectDailyByEnrollment.get(e.id) ?? new Map<string, DailyAttendance[]>()
+        const inWeek = (d: DailyAttendance) => d.date >= weekRange.start && d.date <= weekRange.end
         const subjects = [...subjectNames.entries()]
           .sort(([a], [b]) => a.localeCompare(b))
           .map(([code, name]) => ({
             code,
             name,
-            daily: (subjectDaily.get(code) ?? []).map((d) => ({ date: d.date, present: d.present > 0 })),
+            daily: (subjectDaily.get(code) ?? []).filter(inWeek),
           }))
         return {
           roll: displayRoll(e),
@@ -289,7 +290,7 @@ export default function TgDashboardPage() {
           weeklyTotal: weekly.total,
           overallPresent: overall.present,
           overallTotal: overall.total,
-          overallDaily: (dailyByEnrollment.get(e.id) ?? []).map((d) => ({ date: d.date, present: d.present > 0 })),
+          weekDaily: (dailyByEnrollment.get(e.id) ?? []).filter(inWeek),
           subjects,
         }
       })

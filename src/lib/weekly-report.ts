@@ -6,15 +6,16 @@
 // demand here rather than at app startup — same pattern already used for
 // the xlsx roster/attendance parsers.
 
-export interface DailyMark {
+export interface DailyCount {
   date: string
-  present: boolean
+  present: number
+  total: number
 }
 
-export interface StudentSubjectStreak {
+export interface StudentSubjectWeek {
   code: string
   name: string
-  daily: DailyMark[]
+  daily: DailyCount[]
 }
 
 export interface StudentReportData {
@@ -25,8 +26,9 @@ export interface StudentReportData {
   weeklyTotal: number
   overallPresent: number
   overallTotal: number
-  overallDaily: DailyMark[]
-  subjects: StudentSubjectStreak[]
+  /** This report's Mon-Sat week only, one entry per day that had a session. */
+  weekDaily: DailyCount[]
+  subjects: StudentSubjectWeek[]
 }
 
 export interface WeeklyReportParams {
@@ -42,6 +44,7 @@ export interface WeeklyReportParams {
 type RGB = readonly [number, number, number]
 
 const GOOD: RGB = [12, 163, 12]
+const PARTIAL: RGB = [201, 133, 0]
 const CRITICAL: RGB = [208, 59, 59]
 const CRITICAL_BG: RGB = [253, 232, 232]
 const INK: RGB = [30, 41, 59]
@@ -52,6 +55,15 @@ const TEAL_BG: RGB = [235, 249, 247]
 const EMPTY_CELL: RGB = [235, 238, 242]
 const WHITE: RGB = [255, 255, 255]
 const DAY_LETTERS = ["M", "T", "W", "T", "F", "S"]
+
+/** Full-present -> green, zero-present -> red, partial (some sessions
+ * present, some not, on the same day) -> amber, no session -> gray. */
+function dayColor(present: number, total: number): RGB {
+  if (total === 0) return EMPTY_CELL
+  if (present === total) return GOOD
+  if (present === 0) return CRITICAL
+  return PARTIAL
+}
 
 function addDaysISO(iso: string, days: number): string {
   const d = new Date(`${iso}T00:00:00`)
@@ -151,80 +163,57 @@ export async function generateWeeklyReportPdf(params: WeeklyReportParams) {
     doc.setTextColor(...INK)
   }
 
-  /** GitHub/LeetCode-style streak row: label + name on the left, a strip of
-   * small present/absent squares on the right (most recent cell rightmost),
-   * capped to however many fit the available width. */
-  function drawStreakRow(x: number, y: number, w: number, label: string, sublabel: string | null, daily: DailyMark[]) {
-    doc.setFont("helvetica", "bold")
-    doc.setFontSize(8.5)
-    doc.setTextColor(...INK)
-    doc.text(label, x, y)
-    if (sublabel) {
-      const labelW = doc.getTextWidth(label)
-      doc.setFont("helvetica", "normal")
-      doc.setFontSize(7)
-      doc.setTextColor(...MUTED)
-      doc.text(sublabel, x + labelW + 3, y)
-    }
-
-    const cellsY = y + 2.5
-    const pitch = 4.2
-    const cellSize = 3.2
-    const maxCells = Math.max(1, Math.floor(w / pitch))
-    const shown = daily.slice(-maxCells)
-    const startX = x + w - shown.length * pitch
-
-    doc.setFont("helvetica", "normal")
-    doc.setTextColor(...INK)
-    shown.forEach((d, i) => {
-      const cx = startX + i * pitch
-      doc.setFillColor(...(d.present ? GOOD : CRITICAL))
-      doc.roundedRect(cx, cellsY, cellSize, cellSize, 0.7, 0.7, "F")
-    })
-    if (shown.length === 0) {
-      doc.setFillColor(...EMPTY_CELL)
-      doc.roundedRect(x + w - pitch, cellsY, cellSize, cellSize, 0.7, 0.7, "F")
-    }
-  }
-
-  /** This week's own Mon-Sat calendar — 6 labeled day boxes, separate from
-   * the long streak history (which only shows the most recent N sessions,
-   * not calendar days), so the current academic week reads at a glance. */
-  function drawWeekGrid(x: number, y: number, title: string, weekStart: string, daily: DailyMark[]) {
+  /** One Mon-Sat row: a title (e.g. "Overall" or a subject), then 6 boxes —
+   * one per weekday — each showing that day's date and a plain
+   * "present/total" fraction (a day can have more than one session, e.g.
+   * two lectures of the same subject), colored green/amber/red/gray. This
+   * replaces an earlier long historical "streak" of unlabeled dots, which
+   * wasn't legible — every box here always shows its own numbers. */
+  function drawWeekRow(x: number, y: number, title: string, subtitle: string | null, weekStart: string, daily: DailyCount[]) {
     doc.setFont("helvetica", "bold")
     doc.setFontSize(8.5)
     doc.setTextColor(...INK)
     doc.text(title, x, y)
+    if (subtitle) {
+      const titleW = doc.getTextWidth(title)
+      doc.setFont("helvetica", "normal")
+      doc.setFontSize(7)
+      doc.setTextColor(...MUTED)
+      doc.text(subtitle, x + titleW + 3, y)
+    }
 
-    const boxSize = 9
-    const pitch = 12
-    const boxesY = y + 4
-    const byDate = new Map(daily.map((d) => [d.date, d.present]))
+    const boxW = 15
+    const boxH = 10.5
+    const pitch = 17
+    const boxesY = y + 3.5
+    const byDate = new Map(daily.map((d) => [d.date, d]))
 
     for (let i = 0; i < 6; i++) {
       const date = addDaysISO(weekStart, i)
-      const present = byDate.get(date)
-      const color = present === undefined ? EMPTY_CELL : present ? GOOD : CRITICAL
+      const entry = byDate.get(date)
+      const present = entry?.present ?? 0
+      const total = entry?.total ?? 0
+      const color = dayColor(present, total)
       const bx = x + i * pitch
 
       doc.setFont("helvetica", "normal")
-      doc.setFontSize(6.5)
+      doc.setFontSize(6)
       doc.setTextColor(...MUTED)
-      doc.text(DAY_LETTERS[i], bx + boxSize / 2, boxesY - 1.5, { align: "center" })
+      doc.text(`${DAY_LETTERS[i]} ${Number(date.slice(8, 10))}`, bx + boxW / 2, boxesY - 1.3, { align: "center" })
 
       doc.setFillColor(...color)
-      doc.roundedRect(bx, boxesY, boxSize, boxSize, 1.4, 1.4, "F")
+      doc.roundedRect(bx, boxesY, boxW, boxH, 1.4, 1.4, "F")
 
       doc.setFont("helvetica", "bold")
-      doc.setFontSize(7)
-      doc.setTextColor(...(present === undefined ? MUTED : WHITE))
-      doc.text(String(Number(date.slice(8, 10))), bx + boxSize / 2, boxesY + boxSize / 2 + 1.3, { align: "center" })
+      doc.setFontSize(8)
+      doc.setTextColor(...(total === 0 ? MUTED : WHITE))
+      doc.text(total === 0 ? "-" : `${present}/${total}`, bx + boxW / 2, boxesY + boxH / 2 + 1.4, { align: "center" })
     }
     doc.setTextColor(...INK)
     doc.setFont("helvetica", "normal")
   }
 
-  const streakRowHeight = 9
+  const weekRowHeight = 17
 
   /** Advances to a new page (redrawing the header) if the next block of
    * `need` mm wouldn't fit above the footer — student pages have a
@@ -429,33 +418,27 @@ export async function generateWeeklyReportPdf(params: WeeklyReportParams) {
 
     cursorY = ringsY + 20
 
-    // This week's own Mon-Sat calendar — separate from the long streak
-    // history below, so the current week reads at a glance day-by-day.
-    ensureSpace(18, student.roll)
-    drawWeekGrid(margin, cursorY, "This week, day by day", rangeStart, student.overallDaily)
-    cursorY += 18
-
     ensureSpace(10, student.roll)
     doc.setFont("helvetica", "bold")
     doc.setFontSize(10)
-    doc.text("Attendance streak", margin, cursorY)
+    doc.text("Day by day this week", margin, cursorY)
     doc.setDrawColor(...FAINT)
-    doc.line(margin + 36, cursorY - 1.5, pageWidth - margin, cursorY - 1.5)
+    doc.line(margin + 42, cursorY - 1.5, pageWidth - margin, cursorY - 1.5)
     doc.setFont("helvetica", "normal")
     doc.setFontSize(6.5)
     doc.setTextColor(...MUTED)
-    doc.text("green = present · red = absent", pageWidth - margin, cursorY, { align: "right" })
+    doc.text("each box: sessions present / total that day", pageWidth - margin, cursorY, { align: "right" })
     doc.setTextColor(...INK)
     cursorY += 8
 
-    ensureSpace(streakRowHeight, student.roll)
-    drawStreakRow(margin, cursorY, contentW, "Overall", null, student.overallDaily)
-    cursorY += streakRowHeight
+    ensureSpace(weekRowHeight, student.roll)
+    drawWeekRow(margin, cursorY, "Overall", null, rangeStart, student.weekDaily)
+    cursorY += weekRowHeight
 
     for (const subj of student.subjects) {
-      ensureSpace(streakRowHeight, student.roll)
-      drawStreakRow(margin, cursorY, contentW, subj.code, subj.name, subj.daily)
-      cursorY += streakRowHeight
+      ensureSpace(weekRowHeight, student.roll)
+      drawWeekRow(margin, cursorY, subj.code, subj.name, rangeStart, subj.daily)
+      cursorY += weekRowHeight
     }
 
     drawFooter(student.roll)
