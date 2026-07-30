@@ -34,7 +34,12 @@ type EnrollmentWithStudent = Database["public"]["Tables"]["student_enrollments"]
 interface AttendanceRow {
   enrollment_id: string
   status: string
-  session: { date: string } | null
+  session: { date: string; subject: { code: string; name: string } | null } | null
+}
+
+interface CohortMemberSubjectRow {
+  enrollment_id: string
+  cohort: { subject: { code: string; name: string } | null } | null
 }
 
 const LOW_ATTENDANCE_THRESHOLD = 75
@@ -113,10 +118,27 @@ export default function TgDashboardPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("attendance_records")
-        .select("enrollment_id, status, session:attendance_sessions(date)")
+        .select("enrollment_id, status, session:attendance_sessions(date, subject:subjects(code, name))")
         .in("enrollment_id", enrollmentIds)
       if (error) throw error
       return (data ?? []) as unknown as AttendanceRow[]
+    },
+  })
+
+  // The definitive subject list per student (regardless of whether they
+  // have attendance data yet), same idea as the TG student detail page —
+  // a subject with zero sessions this week should still show up as 0/0,
+  // not silently vanish from the report.
+  const { data: cohortSubjects } = useQuery({
+    queryKey: ["batch-cohort-subjects", enrollmentIds],
+    enabled: enrollmentIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("cohort_members")
+        .select("enrollment_id, cohort:cohorts(subject:subjects(code, name))")
+        .in("enrollment_id", enrollmentIds)
+      if (error) throw error
+      return (data ?? []) as unknown as CohortMemberSubjectRow[]
     },
   })
 
@@ -191,24 +213,63 @@ export default function TgDashboardPage() {
     return map
   }, [attendance, weekRange])
 
+  const subjectsByEnrollment = useMemo(() => {
+    const map = new Map<string, Map<string, string>>()
+    for (const cs of cohortSubjects ?? []) {
+      const subj = cs.cohort?.subject
+      if (!subj) continue
+      const m = map.get(cs.enrollment_id) ?? new Map<string, string>()
+      m.set(subj.code, subj.name)
+      map.set(cs.enrollment_id, m)
+    }
+    return map
+  }, [cohortSubjects])
+
+  const weeklySubjectByEnrollment = useMemo(() => {
+    const map = new Map<string, Map<string, { present: number; total: number }>>()
+    for (const r of attendance ?? []) {
+      if (!r.session || r.session.date < weekRange.start || r.session.date > weekRange.end) continue
+      const subj = r.session.subject
+      if (!subj) continue
+      const m = map.get(r.enrollment_id) ?? new Map<string, { present: number; total: number }>()
+      const entry = m.get(subj.code) ?? { present: 0, total: 0 }
+      entry.total += 1
+      if (r.status === "present" || r.status === "late") entry.present += 1
+      m.set(subj.code, entry)
+      map.set(r.enrollment_id, m)
+    }
+    return map
+  }, [attendance, weekRange])
+
   const [reportPending, setReportPending] = useState(false)
 
   async function handleDownloadReport() {
     if (!enrollments || !batches) return
-    const rows = enrollments
+    const students = enrollments
       .slice()
       .sort((a, b) => a.roll_seq - b.roll_seq)
       .map((e) => {
-        const overall = attendanceByEnrollment.get(e.id)
+        const overall = attendanceByEnrollment.get(e.id) ?? { present: 0, total: 0 }
         const weekly = weeklyAttendanceByEnrollment.get(e.id) ?? { present: 0, total: 0 }
+        const subjectNames = subjectsByEnrollment.get(e.id) ?? new Map<string, string>()
+        const weeklyBySubject = weeklySubjectByEnrollment.get(e.id) ?? new Map()
+        const subjects = [...subjectNames.entries()]
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([code, name]) => {
+            const s = weeklyBySubject.get(code) ?? { present: 0, total: 0 }
+            return { code, name, present: s.present, total: s.total }
+          })
         return {
           roll: displayRoll(e),
           name: e.student?.name ?? "—",
+          prn: e.student?.prn ?? null,
           weeklyPresent: weekly.present,
           weeklyTotal: weekly.total,
-          overallPct: overall && overall.total > 0 ? (overall.present / overall.total) * 100 : null,
+          overallPresent: overall.present,
+          overallTotal: overall.total,
           sgpa: latestGpaByEnrollment.get(e.id) ?? null,
           absenceStreak: streakByEnrollment.get(e.id) ?? 0,
+          subjects,
         }
       })
     setReportPending(true)
@@ -216,9 +277,10 @@ export default function TgDashboardPage() {
       await generateWeeklyReportPdf({
         batchLabel: batches.map((b) => `${b.year_level}${b.division} ${b.roll_start}-${b.roll_end}`).join(", "),
         tgName: teacher?.name ?? "—",
+        tgEmail: teacher?.email ?? null,
         rangeStart: weekRange.start,
         rangeEnd: weekRange.end,
-        rows,
+        students,
         absenceFlagThreshold: ABSENCE_FLAG_THRESHOLD,
       })
     } finally {
