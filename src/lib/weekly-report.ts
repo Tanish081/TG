@@ -91,7 +91,6 @@ export async function generateWeeklyReportPdf(params: WeeklyReportParams) {
   const pageHeight = doc.internal.pageSize.getHeight()
   const margin = 16
   const contentW = pageWidth - margin * 2
-  const bottomLimit = pageHeight - 16
   const weekLabel = `${fmtDate(rangeStart)} - ${fmtDate(rangeEnd)}`
 
   // ------------------------------------------------------------- helpers
@@ -163,73 +162,61 @@ export async function generateWeeklyReportPdf(params: WeeklyReportParams) {
     doc.setTextColor(...INK)
   }
 
-  /** One Mon-Sat row: a title (e.g. "Overall" or a subject), then 6 boxes —
-   * one per weekday — each showing that day's date and a plain
-   * "present/total" fraction (a day can have more than one session, e.g.
-   * two lectures of the same subject), colored green/amber/red/gray. This
-   * replaces an earlier long historical "streak" of unlabeled dots, which
-   * wasn't legible — every box here always shows its own numbers. */
-  function drawWeekRow(x: number, y: number, title: string, subtitle: string | null, weekStart: string, daily: DailyCount[]) {
-    doc.setFont("helvetica", "bold")
-    doc.setFontSize(8.5)
-    doc.setTextColor(...INK)
-    doc.text(title, x, y)
-    if (subtitle) {
-      const titleW = doc.getTextWidth(title)
-      doc.setFont("helvetica", "normal")
-      doc.setFontSize(7)
-      doc.setTextColor(...MUTED)
-      doc.text(subtitle, x + titleW + 3, y)
-    }
+  /** Subject x Mon-Sat attendance grid — one row per subject (plus
+   * "Overall"), one column per weekday, each cell a plain "present/total"
+   * fraction (a day can hold more than one session) colored green/amber/
+   * red/gray. A real table instead of manually-positioned boxes so it
+   * stays aligned and legible regardless of how many subjects a student
+   * has — autoTable paginates it on its own if it runs long, redrawing
+   * the header/footer on each continuation page via didDrawPage. */
+  function drawWeekTable(
+    startY: number,
+    weekStart: string,
+    rows: { label: string; sublabel: string | null; daily: DailyCount[] }[],
+    footerLabel: string,
+  ) {
+    const weekDates = Array.from({ length: 6 }, (_, i) => addDaysISO(weekStart, i))
+    const head = ["Subject", ...weekDates.map((d, i) => `${DAY_LETTERS[i]} ${Number(d.slice(8, 10))}`)]
+    const meta: { present: number; total: number }[][] = []
+    const body = rows.map((r) => {
+      const byDate = new Map(r.daily.map((d) => [d.date, d]))
+      const rowMeta: { present: number; total: number }[] = []
+      const cells = weekDates.map((date) => {
+        const entry = byDate.get(date)
+        const present = entry?.present ?? 0
+        const total = entry?.total ?? 0
+        rowMeta.push({ present, total })
+        return total === 0 ? "-" : `${present}/${total}`
+      })
+      meta.push(rowMeta)
+      return [r.sublabel ? `${r.label}  ${r.sublabel}` : r.label, ...cells]
+    })
 
-    const boxW = 15
-    const boxH = 10.5
-    const pitch = 17
-    const labelY = y + 6
-    const boxesY = y + 8
-    const byDate = new Map(daily.map((d) => [d.date, d]))
-
-    for (let i = 0; i < 6; i++) {
-      const date = addDaysISO(weekStart, i)
-      const entry = byDate.get(date)
-      const present = entry?.present ?? 0
-      const total = entry?.total ?? 0
-      const color = dayColor(present, total)
-      const bx = x + i * pitch
-
-      doc.setFont("helvetica", "normal")
-      doc.setFontSize(6)
-      doc.setTextColor(...MUTED)
-      doc.text(`${DAY_LETTERS[i]} ${Number(date.slice(8, 10))}`, bx + boxW / 2, labelY, { align: "center" })
-
-      doc.setFillColor(...color)
-      doc.roundedRect(bx, boxesY, boxW, boxH, 1.4, 1.4, "F")
-
-      doc.setFont("helvetica", "bold")
-      doc.setFontSize(8)
-      doc.setTextColor(...(total === 0 ? MUTED : WHITE))
-      doc.text(total === 0 ? "-" : `${present}/${total}`, bx + boxW / 2, boxesY + boxH / 2 + 1.4, { align: "center" })
-    }
-    doc.setTextColor(...INK)
-    doc.setFont("helvetica", "normal")
+    autoTable(doc, {
+      startY,
+      head: [head],
+      body,
+      margin: { top: 34, left: margin, right: margin, bottom: 16 },
+      styles: { fontSize: 8, halign: "center", valign: "middle", cellPadding: 2.4 },
+      headStyles: { fillColor: TEAL as unknown as [number, number, number], fontSize: 7.5 },
+      columnStyles: { 0: { halign: "left", fontStyle: "bold", cellWidth: 50 } },
+      didParseCell: (data) => {
+        if (data.section !== "body") return
+        if (data.column.index === 0) {
+          data.cell.styles.fontSize = 8
+          return
+        }
+        const m = meta[data.row.index][data.column.index - 1]
+        data.cell.styles.fillColor = dayColor(m.present, m.total) as unknown as [number, number, number]
+        data.cell.styles.textColor = (m.total === 0 ? MUTED : WHITE) as unknown as [number, number, number]
+        data.cell.styles.fontStyle = "bold"
+      },
+      didDrawPage: () => {
+        drawHeader()
+        drawFooter(footerLabel)
+      },
+    })
   }
-
-  const weekRowHeight = 24
-
-  /** Advances to a new page (redrawing the header) if the next block of
-   * `need` mm wouldn't fit above the footer — student pages have a
-   * variable number of subjects, so this is the only way to guarantee
-   * nothing gets silently clipped off the bottom of the page. */
-  function ensureSpace(need: number, footerLabel: string) {
-    if (cursorY + need > bottomLimit) {
-      drawFooter(footerLabel)
-      doc.addPage()
-      drawHeader()
-      cursorY = 34
-    }
-  }
-
-  let cursorY = 0
 
   // ---------------------------------------------------------------- cover
   const lowCount = students.filter((s) => {
@@ -417,32 +404,28 @@ export async function generateWeeklyReportPdf(params: WeeklyReportParams) {
     }
     doc.setTextColor(...INK)
 
-    cursorY = ringsY + 20
+    const tableY = ringsY + 20
 
-    ensureSpace(10, student.roll)
     doc.setFont("helvetica", "bold")
     doc.setFontSize(10)
-    doc.text("Day by day this week", margin, cursorY)
+    doc.text("Day by day this week", margin, tableY)
     doc.setDrawColor(...FAINT)
-    doc.line(margin + 42, cursorY - 1.5, pageWidth - margin, cursorY - 1.5)
+    doc.line(margin + 42, tableY - 1.5, pageWidth - margin, tableY - 1.5)
     doc.setFont("helvetica", "normal")
     doc.setFontSize(6.5)
     doc.setTextColor(...MUTED)
-    doc.text("each box: sessions present / total that day", pageWidth - margin, cursorY, { align: "right" })
+    doc.text("each cell: sessions present / total that day", pageWidth - margin, tableY, { align: "right" })
     doc.setTextColor(...INK)
-    cursorY += 8
 
-    ensureSpace(weekRowHeight, student.roll)
-    drawWeekRow(margin, cursorY, "Overall", null, rangeStart, student.weekDaily)
-    cursorY += weekRowHeight
-
-    for (const subj of student.subjects) {
-      ensureSpace(weekRowHeight, student.roll)
-      drawWeekRow(margin, cursorY, subj.code, subj.name, rangeStart, subj.daily)
-      cursorY += weekRowHeight
-    }
-
-    drawFooter(student.roll)
+    drawWeekTable(
+      tableY + 6,
+      rangeStart,
+      [
+        { label: "Overall", sublabel: null, daily: student.weekDaily },
+        ...student.subjects.map((s) => ({ label: s.code, sublabel: s.name, daily: s.daily })),
+      ],
+      student.roll,
+    )
   }
 
   const filenameSafeBatch = batchLabel.replace(/[^a-z0-9]+/gi, "-")
