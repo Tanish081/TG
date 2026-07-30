@@ -185,7 +185,8 @@ export async function generateWeeklyReportPdf(params: WeeklyReportParams) {
     const boxW = 15
     const boxH = 10.5
     const pitch = 17
-    const boxesY = y + 3.5
+    const labelY = y + 6
+    const boxesY = y + 8
     const byDate = new Map(daily.map((d) => [d.date, d]))
 
     for (let i = 0; i < 6; i++) {
@@ -199,7 +200,7 @@ export async function generateWeeklyReportPdf(params: WeeklyReportParams) {
       doc.setFont("helvetica", "normal")
       doc.setFontSize(6)
       doc.setTextColor(...MUTED)
-      doc.text(`${DAY_LETTERS[i]} ${Number(date.slice(8, 10))}`, bx + boxW / 2, boxesY - 1.3, { align: "center" })
+      doc.text(`${DAY_LETTERS[i]} ${Number(date.slice(8, 10))}`, bx + boxW / 2, labelY, { align: "center" })
 
       doc.setFillColor(...color)
       doc.roundedRect(bx, boxesY, boxW, boxH, 1.4, 1.4, "F")
@@ -213,7 +214,7 @@ export async function generateWeeklyReportPdf(params: WeeklyReportParams) {
     doc.setFont("helvetica", "normal")
   }
 
-  const weekRowHeight = 17
+  const weekRowHeight = 24
 
   /** Advances to a new page (redrawing the header) if the next block of
    * `need` mm wouldn't fit above the footer — student pages have a
