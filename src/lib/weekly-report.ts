@@ -25,7 +25,6 @@ export interface StudentReportData {
   weeklyTotal: number
   overallPresent: number
   overallTotal: number
-  absenceStreak: number
   overallDaily: DailyMark[]
   subjects: StudentSubjectStreak[]
 }
@@ -37,7 +36,6 @@ export interface WeeklyReportParams {
   rangeStart: string
   rangeEnd: string
   students: StudentReportData[]
-  absenceFlagThreshold: number
   lowAttendanceThreshold: number
 }
 
@@ -52,6 +50,14 @@ const FAINT: RGB = [226, 232, 240]
 const TEAL: RGB = [13, 108, 101]
 const TEAL_BG: RGB = [235, 249, 247]
 const EMPTY_CELL: RGB = [235, 238, 242]
+const WHITE: RGB = [255, 255, 255]
+const DAY_LETTERS = ["M", "T", "W", "T", "F", "S"]
+
+function addDaysISO(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00`)
+  d.setDate(d.getDate() + days)
+  return d.toISOString().slice(0, 10)
+}
 
 function pct(present: number, total: number): number | null {
   return total > 0 ? (present / total) * 100 : null
@@ -66,8 +72,7 @@ export async function generateWeeklyReportPdf(params: WeeklyReportParams) {
     import("jspdf"),
     import("jspdf-autotable"),
   ])
-  const { batchLabel, tgName, tgEmail, rangeStart, rangeEnd, students, absenceFlagThreshold, lowAttendanceThreshold } =
-    params
+  const { batchLabel, tgName, tgEmail, rangeStart, rangeEnd, students, lowAttendanceThreshold } = params
 
   const doc = new jsPDF()
   const pageWidth = doc.internal.pageSize.getWidth()
@@ -182,6 +187,43 @@ export async function generateWeeklyReportPdf(params: WeeklyReportParams) {
     }
   }
 
+  /** This week's own Mon-Sat calendar — 6 labeled day boxes, separate from
+   * the long streak history (which only shows the most recent N sessions,
+   * not calendar days), so the current academic week reads at a glance. */
+  function drawWeekGrid(x: number, y: number, title: string, weekStart: string, daily: DailyMark[]) {
+    doc.setFont("helvetica", "bold")
+    doc.setFontSize(8.5)
+    doc.setTextColor(...INK)
+    doc.text(title, x, y)
+
+    const boxSize = 9
+    const pitch = 12
+    const boxesY = y + 4
+    const byDate = new Map(daily.map((d) => [d.date, d.present]))
+
+    for (let i = 0; i < 6; i++) {
+      const date = addDaysISO(weekStart, i)
+      const present = byDate.get(date)
+      const color = present === undefined ? EMPTY_CELL : present ? GOOD : CRITICAL
+      const bx = x + i * pitch
+
+      doc.setFont("helvetica", "normal")
+      doc.setFontSize(6.5)
+      doc.setTextColor(...MUTED)
+      doc.text(DAY_LETTERS[i], bx + boxSize / 2, boxesY - 1.5, { align: "center" })
+
+      doc.setFillColor(...color)
+      doc.roundedRect(bx, boxesY, boxSize, boxSize, 1.4, 1.4, "F")
+
+      doc.setFont("helvetica", "bold")
+      doc.setFontSize(7)
+      doc.setTextColor(...(present === undefined ? MUTED : WHITE))
+      doc.text(String(Number(date.slice(8, 10))), bx + boxSize / 2, boxesY + boxSize / 2 + 1.3, { align: "center" })
+    }
+    doc.setTextColor(...INK)
+    doc.setFont("helvetica", "normal")
+  }
+
   const streakRowHeight = 9
 
   /** Advances to a new page (redrawing the header) if the next block of
@@ -204,7 +246,6 @@ export async function generateWeeklyReportPdf(params: WeeklyReportParams) {
     const o = pct(s.overallPresent, s.overallTotal)
     return o !== null && o < lowAttendanceThreshold
   }).length
-  const flaggedCount = students.filter((s) => s.absenceStreak >= absenceFlagThreshold).length
 
   drawHeader()
 
@@ -220,7 +261,6 @@ export async function generateWeeklyReportPdf(params: WeeklyReportParams) {
   const statCols: { label: string; value: string; color: RGB }[] = [
     { label: "STUDENTS", value: String(students.length), color: INK },
     { label: `BELOW ${lowAttendanceThreshold}%`, value: String(lowCount), color: lowCount > 0 ? CRITICAL : INK },
-    { label: "ABSENCE FLAGS", value: String(flaggedCount), color: flaggedCount > 0 ? CRITICAL : INK },
   ]
   const colW = 38
   statCols.forEach((c, i) => {
@@ -249,7 +289,7 @@ export async function generateWeeklyReportPdf(params: WeeklyReportParams) {
     body: students.map((s) => {
       const w = pct(s.weeklyPresent, s.weeklyTotal)
       const o = pct(s.overallPresent, s.overallTotal)
-      return [s.roll, s.name, w === null ? "—" : `${Math.round(w)}%`, o, "View →"]
+      return [s.roll, s.name, w === null ? "—" : `${Math.round(w)}%`, o, "View"]
     }) as unknown as string[][],
     styles: { fontSize: 8.5, valign: "middle" },
     headStyles: { fillColor: TEAL as unknown as [number, number, number], fontSize: 7.5 },
@@ -258,6 +298,13 @@ export async function generateWeeklyReportPdf(params: WeeklyReportParams) {
       if (data.section === "body" && data.column.index === 4) {
         data.cell.styles.textColor = TEAL as unknown as [number, number, number]
         data.cell.styles.fontStyle = "bold"
+      }
+      // Column 3 carries the raw % for didDrawCell to read below, but its
+      // own auto-rendered text must be suppressed — otherwise autoTable
+      // draws that raw number as plain text underneath the bar+label this
+      // hook paints on top, producing overlapping "100% 100 100%" text.
+      if (data.section === "body" && data.column.index === 3) {
+        data.cell.text = []
       }
     },
     didDrawCell: (data) => {
@@ -382,25 +429,11 @@ export async function generateWeeklyReportPdf(params: WeeklyReportParams) {
 
     cursorY = ringsY + 20
 
-    if (student.absenceStreak >= absenceFlagThreshold) {
-      ensureSpace(11 + 6, student.roll)
-      doc.setFillColor(...CRITICAL_BG)
-      doc.setDrawColor(...CRITICAL)
-      doc.roundedRect(margin, cursorY, contentW, 11, 2, 2, "FD")
-      doc.setFont("helvetica", "bold")
-      doc.setFontSize(8.5)
-      doc.setTextColor(...CRITICAL)
-      doc.text(
-        `Attention: ${student.absenceStreak} consecutive days absent as of the most recent session.`,
-        margin + 4,
-        cursorY + 7,
-      )
-      doc.setFont("helvetica", "normal")
-      doc.setTextColor(...INK)
-      cursorY += 11 + 7
-    } else {
-      cursorY += 6
-    }
+    // This week's own Mon-Sat calendar — separate from the long streak
+    // history below, so the current week reads at a glance day-by-day.
+    ensureSpace(18, student.roll)
+    drawWeekGrid(margin, cursorY, "This week, day by day", rangeStart, student.overallDaily)
+    cursorY += 18
 
     ensureSpace(10, student.roll)
     doc.setFont("helvetica", "bold")

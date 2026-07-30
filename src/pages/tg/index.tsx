@@ -224,15 +224,18 @@ export default function TgDashboardPage() {
     return map
   }, [semesterResults])
 
-  // Rolling 7-day window ending today — same definition used for the "last
-  // 7 working days" heatmap on the student detail page, so "this week" means
-  // the same thing everywhere in the app.
+  // The current academic week, Monday through Saturday — not a rolling
+  // 7-day window, so the report's "this week" lines up with an actual
+  // calendar week (and the Mon-Sat day grid on each student's page).
   const weekRange = useMemo(() => {
-    const end = new Date()
-    const start = new Date()
-    start.setDate(start.getDate() - 6)
+    const today = new Date()
+    const daysSinceMonday = (today.getDay() + 6) % 7 // Sun=0 -> 6, Mon=1 -> 0, ...
+    const monday = new Date(today)
+    monday.setDate(today.getDate() - daysSinceMonday)
+    const saturday = new Date(monday)
+    saturday.setDate(monday.getDate() + 5)
     const toISO = (d: Date) => d.toISOString().slice(0, 10)
-    return { start: toISO(start), end: toISO(end) }
+    return { start: toISO(monday), end: toISO(saturday) }
   }, [])
 
   const weeklyAttendanceByEnrollment = useMemo(() => {
@@ -286,7 +289,6 @@ export default function TgDashboardPage() {
           weeklyTotal: weekly.total,
           overallPresent: overall.present,
           overallTotal: overall.total,
-          absenceStreak: streakByEnrollment.get(e.id) ?? 0,
           overallDaily: (dailyByEnrollment.get(e.id) ?? []).map((d) => ({ date: d.date, present: d.present > 0 })),
           subjects,
         }
@@ -300,7 +302,6 @@ export default function TgDashboardPage() {
         rangeStart: weekRange.start,
         rangeEnd: weekRange.end,
         students,
-        absenceFlagThreshold: ABSENCE_FLAG_THRESHOLD,
         lowAttendanceThreshold: LOW_ATTENDANCE_THRESHOLD,
       })
     } finally {
