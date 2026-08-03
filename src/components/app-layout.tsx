@@ -13,6 +13,7 @@ import {
   BarChart3,
   ShieldCheck,
   KeyRound,
+  CalendarClock,
   type LucideIcon,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -86,7 +87,10 @@ const NAV_SECTIONS: NavSection[] = [
   {
     key: "isTg",
     label: "TG",
-    items: [{ to: "/tg", label: "My TG group", icon: UsersRound }],
+    items: [
+      { to: "/tg", label: "My TG group", icon: UsersRound },
+      { to: "/tg/records", label: "Meetings & Records", icon: CalendarClock },
+    ],
   },
   {
     key: "isSubjectTeacher",
@@ -193,9 +197,13 @@ export function AppLayout() {
   const location = useLocation()
   const [changePasswordOpen, setChangePasswordOpen] = useState(false)
 
-  const currentLabel = NAV_SECTIONS.flatMap((s) => s.items).find((item) =>
-    location.pathname === item.to || location.pathname.startsWith(item.to + "/"),
-  )?.label
+  // Longest matching `to` wins — e.g. on /tg/records this must resolve to
+  // "Meetings & Records" (to: "/tg/records"), not "My TG group" (to: "/tg"),
+  // even though both match via the startsWith prefix check.
+  const activeItem = NAV_SECTIONS.flatMap((s) => s.items)
+    .filter((item) => location.pathname === item.to || location.pathname.startsWith(item.to + "/"))
+    .sort((a, b) => b.to.length - a.to.length)[0]
+  const currentLabel = activeItem?.label
 
   const brand = location.pathname.startsWith("/hod")
     ? { label: "HOD", icon: BarChart3, iconBg: "bg-gradient-to-br from-indigo-600 to-violet-600" }
@@ -227,8 +235,7 @@ export function AppLayout() {
                 <SidebarGroupContent>
                   <SidebarMenu>
                     {section.items.map((item) => {
-                      const isActive =
-                        location.pathname === item.to || location.pathname.startsWith(item.to + "/")
+                      const isActive = item.to === activeItem?.to
                       return (
                         <SidebarMenuItem key={item.to}>
                           <SidebarMenuButton asChild isActive={isActive}>

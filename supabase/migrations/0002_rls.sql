@@ -512,6 +512,63 @@ create policy semester_results_full_tg on semester_results
   with check (is_tg_of_enrollment(enrollment_id));
 
 -- ----------------------------------------------------------------------------
+-- TG record-keeping — meetings (whole batch), counseling and communication
+-- log (one student each). Owned by the TG who created them; Dept
+-- Coordinators get full oversight access like everywhere else.
+-- ----------------------------------------------------------------------------
+alter table tg_meetings enable row level security;
+
+create policy tg_meetings_full_hod on tg_meetings
+  for all to authenticated
+  using (is_dept_coordinator())
+  with check (is_dept_coordinator());
+
+create policy tg_meetings_full_tg on tg_meetings
+  for all to authenticated
+  using (tg_teacher_id = auth.uid())
+  with check (tg_teacher_id = auth.uid());
+
+alter table tg_meeting_attendance enable row level security;
+
+create policy tg_meeting_attendance_full_hod on tg_meeting_attendance
+  for all to authenticated
+  using (is_dept_coordinator())
+  with check (is_dept_coordinator());
+
+create policy tg_meeting_attendance_full_tg on tg_meeting_attendance
+  for all to authenticated
+  using (exists (
+    select 1 from tg_meetings m where m.id = tg_meeting_attendance.meeting_id and m.tg_teacher_id = auth.uid()
+  ))
+  with check (exists (
+    select 1 from tg_meetings m where m.id = tg_meeting_attendance.meeting_id and m.tg_teacher_id = auth.uid()
+  ));
+
+alter table tg_counseling_sessions enable row level security;
+
+create policy tg_counseling_full_hod on tg_counseling_sessions
+  for all to authenticated
+  using (is_dept_coordinator())
+  with check (is_dept_coordinator());
+
+create policy tg_counseling_full_tg on tg_counseling_sessions
+  for all to authenticated
+  using (tg_teacher_id = auth.uid())
+  with check (tg_teacher_id = auth.uid());
+
+alter table tg_communications enable row level security;
+
+create policy tg_communications_full_hod on tg_communications
+  for all to authenticated
+  using (is_dept_coordinator())
+  with check (is_dept_coordinator());
+
+create policy tg_communications_full_tg on tg_communications
+  for all to authenticated
+  using (tg_teacher_id = auth.uid())
+  with check (tg_teacher_id = auth.uid());
+
+-- ----------------------------------------------------------------------------
 -- HOD (read-only department-wide statistics). SELECT only, everywhere — this
 -- role structurally cannot manipulate data since no write policy anywhere
 -- references is_hod(). `divisions` and `subjects` already have an open

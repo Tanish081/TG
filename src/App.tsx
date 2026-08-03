@@ -15,6 +15,7 @@ import AttendancePage from "@/pages/attendance/index"
 import AttendanceSessionPage from "@/pages/attendance/session"
 import TgDashboardPage from "@/pages/tg/index"
 import TgStudentPage from "@/pages/tg/student"
+import TgRecordsPage from "@/pages/tg/records"
 import MyDivisionPage from "@/pages/division/index"
 import HodStatsPage from "@/pages/hod/index"
 
@@ -39,6 +40,7 @@ export default function App() {
           <Route path="/attendance/:cohortId" element={<AttendanceSessionPage />} />
 
           <Route path="/tg" element={<TgDashboardPage />} />
+          <Route path="/tg/records" element={<TgRecordsPage />} />
           <Route path="/tg/:enrollmentId" element={<TgStudentPage />} />
 
           <Route path="/division" element={<MyDivisionPage />} />

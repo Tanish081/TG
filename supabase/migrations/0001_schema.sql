@@ -293,3 +293,55 @@ create table semester_results (
   created_at    timestamptz not null default now(),
   unique (enrollment_id, semester)
 );
+
+-- ----------------------------------------------------------------------------
+-- TG record-keeping — meetings (whole batch), counseling (one student),
+-- communication log (one student). All owned by the TG who created them.
+-- ----------------------------------------------------------------------------
+create table tg_meetings (
+  id             uuid primary key default gen_random_uuid(),
+  tg_teacher_id  uuid not null references teachers (id),
+  batch_id       uuid not null references batches (id) on delete cascade,
+  meeting_date   date not null,
+  meeting_time   time not null,
+  agenda         text not null,
+  created_at     timestamptz not null default now()
+);
+
+create index idx_tg_meetings_batch on tg_meetings (batch_id);
+create index idx_tg_meetings_teacher on tg_meetings (tg_teacher_id);
+
+create table tg_meeting_attendance (
+  id          uuid primary key default gen_random_uuid(),
+  meeting_id  uuid not null references tg_meetings (id) on delete cascade,
+  enrollment_id uuid not null references student_enrollments (id) on delete cascade,
+  present     boolean not null default true,
+  unique (meeting_id, enrollment_id)
+);
+
+create table tg_counseling_sessions (
+  id             uuid primary key default gen_random_uuid(),
+  tg_teacher_id  uuid not null references teachers (id),
+  enrollment_id  uuid not null references student_enrollments (id) on delete cascade,
+  session_date   date not null,
+  reason         text not null,
+  remarks        text,
+  created_at     timestamptz not null default now()
+);
+
+create index idx_tg_counseling_enrollment on tg_counseling_sessions (enrollment_id);
+create index idx_tg_counseling_teacher on tg_counseling_sessions (tg_teacher_id);
+
+create table tg_communications (
+  id             uuid primary key default gen_random_uuid(),
+  tg_teacher_id  uuid not null references teachers (id),
+  enrollment_id  uuid not null references student_enrollments (id) on delete cascade,
+  comm_date      date not null,
+  mode           text not null default 'call' check (mode in ('call', 'message', 'email', 'in_person', 'other')),
+  purpose        text not null,
+  result         text,
+  created_at     timestamptz not null default now()
+);
+
+create index idx_tg_communications_enrollment on tg_communications (enrollment_id);
+create index idx_tg_communications_teacher on tg_communications (tg_teacher_id);

@@ -3,6 +3,7 @@ export type CohortType = "core" | "elective"
 export type AttendanceStatus = "present" | "absent" | "late"
 export type ExamType = "insem" | "endsem"
 export type StudentStatus = "active" | "yd" | "left"
+export type CommunicationMode = "call" | "message" | "email" | "in_person" | "other"
 
 // Minimal shape of @supabase/postgrest-js's GenericTable — declared locally
 // so this hand-written schema doesn't depend on postgrest-js's internal types.
@@ -271,6 +272,73 @@ export interface Database {
           cgpa?: number | null
           academic_year?: string
         }
+      >
+      tg_meetings: Tbl<
+        {
+          id: string
+          tg_teacher_id: string
+          batch_id: string
+          meeting_date: string
+          meeting_time: string
+          agenda: string
+          created_at: string
+        },
+        {
+          id?: string
+          tg_teacher_id: string
+          batch_id: string
+          meeting_date: string
+          meeting_time: string
+          agenda: string
+        },
+        { meeting_date?: string; meeting_time?: string; agenda?: string }
+      >
+      tg_meeting_attendance: Tbl<
+        { id: string; meeting_id: string; enrollment_id: string; present: boolean },
+        { id?: string; meeting_id: string; enrollment_id: string; present?: boolean },
+        { present?: boolean }
+      >
+      tg_counseling_sessions: Tbl<
+        {
+          id: string
+          tg_teacher_id: string
+          enrollment_id: string
+          session_date: string
+          reason: string
+          remarks: string | null
+          created_at: string
+        },
+        {
+          id?: string
+          tg_teacher_id: string
+          enrollment_id: string
+          session_date: string
+          reason: string
+          remarks?: string | null
+        },
+        { session_date?: string; reason?: string; remarks?: string | null }
+      >
+      tg_communications: Tbl<
+        {
+          id: string
+          tg_teacher_id: string
+          enrollment_id: string
+          comm_date: string
+          mode: CommunicationMode
+          purpose: string
+          result: string | null
+          created_at: string
+        },
+        {
+          id?: string
+          tg_teacher_id: string
+          enrollment_id: string
+          comm_date: string
+          mode?: CommunicationMode
+          purpose: string
+          result?: string | null
+        },
+        { comm_date?: string; mode?: CommunicationMode; purpose?: string; result?: string | null }
       >
     }
     Views: Record<string, never>
