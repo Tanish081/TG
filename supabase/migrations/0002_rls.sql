@@ -102,6 +102,20 @@ as $$
   )
 $$;
 
+-- Whichever TG currently has this student in their batch — not whoever
+-- entered a given profile/achievement row. This is what lets the student
+-- profile "stand even if the TG changes": access follows the student's
+-- current enrollment, never the original author.
+create function is_tg_of_student(p_student_id uuid)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (
+    select 1 from student_enrollments se
+    where se.student_id = p_student_id and is_tg_of_enrollment(se.id)
+  )
+$$;
+
 create function teaches_cohort(p_cohort_id uuid)
 returns boolean
 language sql stable security definer set search_path = public
@@ -567,6 +581,66 @@ create policy tg_communications_full_tg on tg_communications
   for all to authenticated
   using (tg_teacher_id = auth.uid())
   with check (tg_teacher_id = auth.uid());
+
+-- ----------------------------------------------------------------------------
+-- Student profile (personal / academic / achievements). Scoped by
+-- is_tg_of_student(), not by who created the row — see that function's
+-- comment for why.
+-- ----------------------------------------------------------------------------
+alter table student_profiles enable row level security;
+
+create policy student_profiles_full_hod on student_profiles
+  for all to authenticated
+  using (is_dept_coordinator())
+  with check (is_dept_coordinator());
+
+create policy student_profiles_full_tg on student_profiles
+  for all to authenticated
+  using (is_tg_of_student(student_id))
+  with check (is_tg_of_student(student_id));
+
+alter table student_academic_info enable row level security;
+
+create policy student_academic_info_full_hod on student_academic_info
+  for all to authenticated
+  using (is_dept_coordinator())
+  with check (is_dept_coordinator());
+
+create policy student_academic_info_full_tg on student_academic_info
+  for all to authenticated
+  using (is_tg_of_student(student_id))
+  with check (is_tg_of_student(student_id));
+
+alter table student_achievements enable row level security;
+
+create policy student_achievements_full_hod on student_achievements
+  for all to authenticated
+  using (is_dept_coordinator())
+  with check (is_dept_coordinator());
+
+create policy student_achievements_full_tg on student_achievements
+  for all to authenticated
+  using (is_tg_of_student(student_id))
+  with check (is_tg_of_student(student_id));
+
+-- ----------------------------------------------------------------------------
+-- Storage: achievement documents. Private bucket — objects are stored as
+-- {student_id}/{filename}, so the same is_tg_of_student() check applies by
+-- reading the first path segment as the student id.
+-- ----------------------------------------------------------------------------
+insert into storage.buckets (id, name, public)
+values ('student-achievements', 'student-achievements', false)
+on conflict (id) do nothing;
+
+create policy student_achievement_docs_hod on storage.objects
+  for all to authenticated
+  using (bucket_id = 'student-achievements' and is_dept_coordinator())
+  with check (bucket_id = 'student-achievements' and is_dept_coordinator());
+
+create policy student_achievement_docs_tg on storage.objects
+  for all to authenticated
+  using (bucket_id = 'student-achievements' and is_tg_of_student(((storage.foldername(name))[1])::uuid))
+  with check (bucket_id = 'student-achievements' and is_tg_of_student(((storage.foldername(name))[1])::uuid));
 
 -- ----------------------------------------------------------------------------
 -- HOD (read-only department-wide statistics). SELECT only, everywhere — this

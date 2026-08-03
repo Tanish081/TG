@@ -345,3 +345,48 @@ create table tg_communications (
 
 create index idx_tg_communications_enrollment on tg_communications (enrollment_id);
 create index idx_tg_communications_teacher on tg_communications (tg_teacher_id);
+
+-- ----------------------------------------------------------------------------
+-- Student profile — personal, academic, achievements. Keyed on students.id
+-- (the permanent identity, §3), not on any one enrollment or TG, so this
+-- data stands even when the TG or academic year changes. Whichever teacher
+-- is currently TG for this student (via their active enrollment) can read
+-- and edit it — see is_tg_of_student() in 0002_rls.sql.
+-- ----------------------------------------------------------------------------
+create table student_profiles (
+  student_id       uuid primary key references students (id) on delete cascade,
+  date_of_birth    date,
+  blood_group      text,
+  father_name      text,
+  mother_name      text,
+  guardian_contact text,
+  address          text,
+  alt_contact      text,
+  updated_by       uuid references teachers (id),
+  updated_at       timestamptz not null default now()
+);
+
+-- SGPA per semester already lives in semester_results (per enrollment,
+-- entered elsewhere) — this only holds the ongoing "backlog" status, which
+-- isn't tied to any one semester's row.
+create table student_academic_info (
+  student_id      uuid primary key references students (id) on delete cascade,
+  backlogs_count  integer not null default 0,
+  backlogs_notes  text,
+  updated_by      uuid references teachers (id),
+  updated_at      timestamptz not null default now()
+);
+
+create table student_achievements (
+  id            uuid primary key default gen_random_uuid(),
+  student_id    uuid not null references students (id) on delete cascade,
+  category      text not null default 'other' check (category in ('academic', 'extracurricular', 'certification', 'other')),
+  title         text not null,
+  description   text,
+  achieved_date date,
+  document_path text,
+  created_by    uuid references teachers (id),
+  created_at    timestamptz not null default now()
+);
+
+create index idx_student_achievements_student on student_achievements (student_id);

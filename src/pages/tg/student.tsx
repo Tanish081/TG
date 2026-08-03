@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useParams, Link } from "react-router-dom"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
@@ -12,8 +12,13 @@ import {
   Mail,
   Phone,
   UserRound,
+  FileText,
+  Paperclip,
+  Trash2,
+  Plus,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { useAuth } from "@/hooks/use-auth"
 import { cn } from "@/lib/utils"
 import { currentAbsenceStreak, ABSENCE_FLAG_THRESHOLD } from "@/lib/attendance-daily"
 import { displayRoll } from "@/lib/roll-code"
@@ -21,6 +26,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
@@ -40,14 +46,23 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { SectionShell } from "@/components/section-shell"
-import type { Database } from "@/types/database"
+import type { AchievementCategory, Database } from "@/types/database"
+
+const ACHIEVEMENT_LABELS: Record<AchievementCategory, string> = {
+  academic: "Academic",
+  extracurricular: "Extracurricular",
+  certification: "Certification",
+  other: "Other",
+}
 
 type EnrollmentWithStudent = Database["public"]["Tables"]["student_enrollments"]["Row"] & {
   student: { name: string; prn: string | null; email: string | null; phone: string | null } | null
@@ -114,6 +129,7 @@ function weekdayLetter(iso: string) {
 
 export default function TgStudentPage() {
   const { enrollmentId } = useParams<{ enrollmentId: string }>()
+  const { teacher } = useAuth()
   const queryClient = useQueryClient()
 
   const [markOpen, setMarkOpen] = useState(false)
@@ -327,6 +343,185 @@ export default function TgStudentPage() {
     onError: (err: Error) => toast.error(err.message),
   })
 
+  // ----------------------------------------------------------------------
+  // Student profile — personal / academic / achievements. Keyed on the
+  // student's permanent id (not this enrollment or the TG), so it stays put
+  // across academic years and TG handovers; see is_tg_of_student() in the
+  // schema for why access still works after a handover.
+  // ----------------------------------------------------------------------
+  const studentId = enrollment?.student_id
+
+  const { data: profile } = useQuery({
+    queryKey: ["student-profile", studentId],
+    enabled: !!studentId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("student_profiles")
+        .select("*")
+        .eq("student_id", studentId!)
+        .maybeSingle()
+      if (error) throw error
+      return data
+    },
+  })
+
+  const { data: academicInfo } = useQuery({
+    queryKey: ["student-academic-info", studentId],
+    enabled: !!studentId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("student_academic_info")
+        .select("*")
+        .eq("student_id", studentId!)
+        .maybeSingle()
+      if (error) throw error
+      return data
+    },
+  })
+
+  const { data: achievements } = useQuery({
+    queryKey: ["student-achievements", studentId],
+    enabled: !!studentId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("student_achievements")
+        .select("*")
+        .eq("student_id", studentId!)
+        .order("achieved_date", { ascending: false })
+      if (error) throw error
+      return data
+    },
+  })
+
+  const [dob, setDob] = useState("")
+  const [bloodGroup, setBloodGroup] = useState("")
+  const [fatherName, setFatherName] = useState("")
+  const [motherName, setMotherName] = useState("")
+  const [guardianContact, setGuardianContact] = useState("")
+  const [address, setAddress] = useState("")
+  const [altContact, setAltContact] = useState("")
+
+  useEffect(() => {
+    if (!profile) return
+    setDob(profile.date_of_birth ?? "")
+    setBloodGroup(profile.blood_group ?? "")
+    setFatherName(profile.father_name ?? "")
+    setMotherName(profile.mother_name ?? "")
+    setGuardianContact(profile.guardian_contact ?? "")
+    setAddress(profile.address ?? "")
+    setAltContact(profile.alt_contact ?? "")
+  }, [profile])
+
+  const savePersonal = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.from("student_profiles").upsert({
+        student_id: studentId!,
+        date_of_birth: dob || null,
+        blood_group: bloodGroup || null,
+        father_name: fatherName || null,
+        mother_name: motherName || null,
+        guardian_contact: guardianContact || null,
+        address: address || null,
+        alt_contact: altContact || null,
+        updated_by: teacher?.id,
+        updated_at: new Date().toISOString(),
+      })
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success("Personal details saved")
+      queryClient.invalidateQueries({ queryKey: ["student-profile", studentId] })
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const [backlogsCount, setBacklogsCount] = useState("0")
+  const [backlogsNotes, setBacklogsNotes] = useState("")
+
+  useEffect(() => {
+    if (!academicInfo) return
+    setBacklogsCount(String(academicInfo.backlogs_count))
+    setBacklogsNotes(academicInfo.backlogs_notes ?? "")
+  }, [academicInfo])
+
+  const saveAcademic = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.from("student_academic_info").upsert({
+        student_id: studentId!,
+        backlogs_count: Number(backlogsCount) || 0,
+        backlogs_notes: backlogsNotes || null,
+        updated_by: teacher?.id,
+        updated_at: new Date().toISOString(),
+      })
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success("Academic info saved")
+      queryClient.invalidateQueries({ queryKey: ["student-academic-info", studentId] })
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const [achievementOpen, setAchievementOpen] = useState(false)
+  const [achCategory, setAchCategory] = useState<AchievementCategory>("academic")
+  const [achTitle, setAchTitle] = useState("")
+  const [achDescription, setAchDescription] = useState("")
+  const [achDate, setAchDate] = useState("")
+  const [achFile, setAchFile] = useState<File | null>(null)
+
+  const addAchievement = useMutation({
+    mutationFn: async () => {
+      let documentPath: string | null = null
+      if (achFile) {
+        const path = `${studentId}/${crypto.randomUUID()}-${achFile.name}`
+        const { error: upErr } = await supabase.storage.from("student-achievements").upload(path, achFile)
+        if (upErr) throw upErr
+        documentPath = path
+      }
+      const { error } = await supabase.from("student_achievements").insert({
+        student_id: studentId!,
+        category: achCategory,
+        title: achTitle,
+        description: achDescription || null,
+        achieved_date: achDate || null,
+        document_path: documentPath,
+        created_by: teacher?.id,
+      })
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success("Achievement added")
+      setAchievementOpen(false)
+      setAchTitle("")
+      setAchDescription("")
+      setAchDate("")
+      setAchFile(null)
+      queryClient.invalidateQueries({ queryKey: ["student-achievements", studentId] })
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const deleteAchievement = useMutation({
+    mutationFn: async (a: NonNullable<typeof achievements>[number]) => {
+      if (a.document_path) {
+        await supabase.storage.from("student-achievements").remove([a.document_path])
+      }
+      const { error } = await supabase.from("student_achievements").delete().eq("id", a.id)
+      if (error) throw error
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["student-achievements", studentId] }),
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  async function handleViewDocument(path: string) {
+    const { data, error } = await supabase.storage.from("student-achievements").createSignedUrl(path, 60)
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+    window.open(data.signedUrl, "_blank")
+  }
+
   if (!enrollment) return <p className="text-muted-foreground">Loading…</p>
 
   const student = enrollment.student ?? { name: "—", prn: null, email: null, phone: null }
@@ -362,6 +557,13 @@ export default function TgStudentPage() {
         <ArrowLeft className="size-4" /> Back to TG group
       </Link>
 
+      <Tabs defaultValue="overview">
+        <TabsList className="mb-4">
+          <TabsTrigger value="overview">Attendance &amp; Marks</TabsTrigger>
+          <TabsTrigger value="profile">Student Profile</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview">
       {isFlagged && (
         <div className="mb-6 flex items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3">
           <FlameKindling className="size-5 shrink-0 text-destructive" />
@@ -657,6 +859,254 @@ export default function TgStudentPage() {
         </Table>
         </Card>
       </section>
+        </TabsContent>
+
+        <TabsContent value="profile" className="flex flex-col gap-6">
+          <Card className="border-slate-200/70 bg-white/70 shadow-sm backdrop-blur-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base text-slate-900">Personal details</CardTitle>
+              <CardDescription>
+                Kept against the student, not this enrollment — stays put across years and TG handovers.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="p-dob">Date of birth</Label>
+                  <Input id="p-dob" type="date" value={dob} onChange={(e) => setDob(e.target.value)} />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="p-blood">Blood group</Label>
+                  <Input id="p-blood" placeholder="e.g. O+" value={bloodGroup} onChange={(e) => setBloodGroup(e.target.value)} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="p-father">Father's name</Label>
+                  <Input id="p-father" value={fatherName} onChange={(e) => setFatherName(e.target.value)} />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="p-mother">Mother's name</Label>
+                  <Input id="p-mother" value={motherName} onChange={(e) => setMotherName(e.target.value)} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="p-guardian">Guardian contact</Label>
+                  <Input id="p-guardian" value={guardianContact} onChange={(e) => setGuardianContact(e.target.value)} />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="p-alt">Alternate contact</Label>
+                  <Input id="p-alt" value={altContact} onChange={(e) => setAltContact(e.target.value)} />
+                </div>
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="p-address">Address</Label>
+                <Textarea id="p-address" rows={2} value={address} onChange={(e) => setAddress(e.target.value)} />
+              </div>
+              <div className="flex justify-end">
+                <Button onClick={() => savePersonal.mutate()} disabled={savePersonal.isPending}>
+                  {savePersonal.isPending ? "Saving…" : "Save personal details"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-slate-200/70 bg-white/70 shadow-sm backdrop-blur-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base text-slate-900">Academic profile</CardTitle>
+              <CardDescription>SGPA per semester (recorded in the Overview tab) plus current backlog status.</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Semester</TableHead>
+                    <TableHead>SGPA</TableHead>
+                    <TableHead>CGPA</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {semesterResults?.map((r) => (
+                    <TableRow key={r.id}>
+                      <TableCell>{r.semester}</TableCell>
+                      <TableCell>{r.sgpa ?? "—"}</TableCell>
+                      <TableCell>{r.cgpa ?? "—"}</TableCell>
+                    </TableRow>
+                  ))}
+                  {(!semesterResults || semesterResults.length === 0) && (
+                    <TableRow>
+                      <TableCell colSpan={3} className="text-center text-muted-foreground">
+                        No GPA recorded yet — add it from the Overview tab.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+              <div className="grid grid-cols-2 gap-4 border-t border-slate-100 pt-4">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="a-backlogs">Active backlogs</Label>
+                  <Input
+                    id="a-backlogs"
+                    type="number"
+                    min={0}
+                    value={backlogsCount}
+                    onChange={(e) => setBacklogsCount(e.target.value)}
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="a-backlog-notes">Which subjects</Label>
+                  <Input
+                    id="a-backlog-notes"
+                    placeholder="e.g. Maths-II, DBMS"
+                    value={backlogsNotes}
+                    onChange={(e) => setBacklogsNotes(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <Button onClick={() => saveAcademic.mutate()} disabled={saveAcademic.isPending}>
+                  {saveAcademic.isPending ? "Saving…" : "Save academic info"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-slate-200/70 bg-white/70 shadow-sm backdrop-blur-sm">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-base text-slate-900">Achievements</CardTitle>
+                  <CardDescription>Academic, extracurricular, certifications — with an optional document.</CardDescription>
+                </div>
+                <Dialog open={achievementOpen} onOpenChange={setAchievementOpen}>
+                  <DialogTrigger asChild>
+                    <Button size="sm" variant="outline">
+                      <Plus className="size-4" /> Add achievement
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Add an achievement</DialogTitle>
+                      <DialogDescription>A document upload is optional.</DialogDescription>
+                    </DialogHeader>
+                    <div className="flex flex-col gap-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="flex flex-col gap-2">
+                          <Label>Category</Label>
+                          <Select value={achCategory} onValueChange={(v) => setAchCategory(v as AchievementCategory)}>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {Object.entries(ACHIEVEMENT_LABELS).map(([value, label]) => (
+                                <SelectItem key={value} value={value}>
+                                  {label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <Label htmlFor="ach-date">Date</Label>
+                          <Input id="ach-date" type="date" value={achDate} onChange={(e) => setAchDate(e.target.value)} />
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <Label htmlFor="ach-title">Title</Label>
+                        <Input
+                          id="ach-title"
+                          placeholder="e.g. Winner — Smart India Hackathon"
+                          value={achTitle}
+                          onChange={(e) => setAchTitle(e.target.value)}
+                        />
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <Label htmlFor="ach-desc">Description</Label>
+                        <Textarea
+                          id="ach-desc"
+                          rows={3}
+                          value={achDescription}
+                          onChange={(e) => setAchDescription(e.target.value)}
+                        />
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <Label htmlFor="ach-file">Document (optional)</Label>
+                        <Input
+                          id="ach-file"
+                          type="file"
+                          onChange={(e) => setAchFile(e.target.files?.[0] ?? null)}
+                        />
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button
+                        onClick={() => addAchievement.mutate()}
+                        disabled={!achTitle || addAchievement.isPending}
+                      >
+                        {addAchievement.isPending ? "Saving…" : "Save achievement"}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>Title</TableHead>
+                    <TableHead>Document</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {achievements?.map((a) => (
+                    <TableRow key={a.id}>
+                      <TableCell>{a.achieved_date ? new Date(a.achieved_date).toLocaleDateString() : "—"}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{ACHIEVEMENT_LABELS[a.category]}</Badge>
+                      </TableCell>
+                      <TableCell className="max-w-[14rem]">
+                        <div className="truncate font-medium">{a.title}</div>
+                        {a.description && <div className="truncate text-xs text-muted-foreground">{a.description}</div>}
+                      </TableCell>
+                      <TableCell>
+                        {a.document_path ? (
+                          <button
+                            type="button"
+                            onClick={() => handleViewDocument(a.document_path!)}
+                            className="flex items-center gap-1 text-sm text-teal-700 hover:underline"
+                          >
+                            <Paperclip className="size-3.5" /> View
+                          </button>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="ghost" size="sm" onClick={() => deleteAchievement.mutate(a)}>
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {(!achievements || achievements.length === 0) && (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center text-muted-foreground">
+                        <FileText className="mx-auto mb-1 size-5 text-slate-300" />
+                        No achievements recorded yet.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </SectionShell>
   )
 }

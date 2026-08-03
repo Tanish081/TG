@@ -58,24 +58,53 @@ export async function generateMeetingMinutesPdf(params: MeetingMinutesParams) {
   doc.setFontSize(15)
   doc.setTextColor(...INK)
   doc.text(`Batch ${batchLabel}`, margin, 38)
-
   doc.setFont("helvetica", "normal")
-  doc.setFontSize(9)
+  doc.setFontSize(8.5)
   doc.setTextColor(...MUTED)
-  doc.text(`${fmtDate(meetingDate)} · ${fmtTime(meetingTime)}  ·  Conducted by ${tgName}`, margin, 45)
+  doc.text(`Conducted by ${tgName}`, margin, 44)
 
+  // Date/time called out as its own highlighted box, not buried in a plain
+  // muted line — this is the one fact someone skimming for "when was this"
+  // needs to find instantly.
+  const infoBoxY = 49
+  const infoBoxW = (pageWidth - margin * 2 - 6) / 2
+  const infoBoxH = 16
+  doc.setFillColor(...TEAL_BG)
+  doc.roundedRect(margin, infoBoxY, infoBoxW, infoBoxH, 2, 2, "F")
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(7)
+  doc.setTextColor(...TEAL)
+  doc.text("DATE", margin + 5, infoBoxY + 6)
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(11)
+  doc.setTextColor(...INK)
+  doc.text(fmtDate(meetingDate), margin + 5, infoBoxY + 13)
+
+  const timeBoxX = margin + infoBoxW + 6
+  doc.setFillColor(...TEAL_BG)
+  doc.roundedRect(timeBoxX, infoBoxY, infoBoxW, infoBoxH, 2, 2, "F")
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(7)
+  doc.setTextColor(...TEAL)
+  doc.text("TIME", timeBoxX + 5, infoBoxY + 6)
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(11)
+  doc.setTextColor(...INK)
+  doc.text(fmtTime(meetingTime), timeBoxX + 5, infoBoxY + 13)
+
+  const agendaY = infoBoxY + infoBoxH + 10
   doc.setFont("helvetica", "bold")
   doc.setFontSize(9.5)
   doc.setTextColor(...INK)
-  doc.text("Agenda", margin, 55)
+  doc.text("Agenda", margin, agendaY)
   doc.setFont("helvetica", "normal")
   doc.setFontSize(9)
   doc.setTextColor(...INK)
   const agendaLines = doc.splitTextToSize(agenda, pageWidth - margin * 2)
-  doc.text(agendaLines, margin, 61)
+  doc.text(agendaLines, margin, agendaY + 6)
 
   const presentCount = attendees.filter((a) => a.present).length
-  const afterAgendaY = 61 + agendaLines.length * 4.5 + 6
+  const afterAgendaY = agendaY + 6 + agendaLines.length * 4.5 + 6
 
   doc.setFont("helvetica", "bold")
   doc.setFontSize(9.5)

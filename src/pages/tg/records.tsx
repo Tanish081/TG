@@ -422,7 +422,7 @@ export default function TgRecordsPage() {
                       </Label>
                       <p className="text-xs text-muted-foreground">Tap a student to toggle</p>
                     </div>
-                    <div className="grid max-h-56 grid-cols-2 gap-2 overflow-y-auto rounded border p-2 sm:grid-cols-3">
+                    <div className="grid max-h-56 grid-cols-2 gap-2 overflow-y-auto rounded border bg-slate-50/50 p-2 sm:grid-cols-3">
                       {meetingRoster
                         .slice()
                         .sort((a, b) => a.roll_seq - b.roll_seq)
@@ -434,14 +434,24 @@ export default function TgRecordsPage() {
                               type="button"
                               onClick={() => setAttendanceMap((m) => ({ ...m, [e.id]: !present }))}
                               className={cn(
-                                "rounded border px-2 py-1.5 text-left text-xs transition-colors",
+                                "group relative flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs shadow-sm transition-all duration-150 ease-out hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:shadow-sm",
                                 present
-                                  ? "border-emerald-300 bg-emerald-50 text-emerald-800"
-                                  : "border-red-300 bg-red-50 text-red-800",
+                                  ? "border-emerald-200 bg-white ring-1 ring-emerald-100"
+                                  : "border-red-200 bg-red-50/70 ring-1 ring-red-100",
                               )}
                             >
-                              <div className="font-mono">{displayRoll(e)}</div>
-                              <div className="truncate">{e.student?.name}</div>
+                              <span
+                                className={cn(
+                                  "flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white transition-colors duration-150",
+                                  present ? "bg-emerald-500" : "bg-red-500",
+                                )}
+                              >
+                                {present ? "✓" : "✕"}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <div className="font-mono text-slate-900">{displayRoll(e)}</div>
+                                <div className="truncate text-slate-600">{e.student?.name}</div>
+                              </div>
                             </button>
                           )
                         })}

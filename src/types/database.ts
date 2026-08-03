@@ -4,6 +4,7 @@ export type AttendanceStatus = "present" | "absent" | "late"
 export type ExamType = "insem" | "endsem"
 export type StudentStatus = "active" | "yd" | "left"
 export type CommunicationMode = "call" | "message" | "email" | "in_person" | "other"
+export type AchievementCategory = "academic" | "extracurricular" | "certification" | "other"
 
 // Minimal shape of @supabase/postgrest-js's GenericTable — declared locally
 // so this hand-written schema doesn't depend on postgrest-js's internal types.
@@ -339,6 +340,89 @@ export interface Database {
           result?: string | null
         },
         { comm_date?: string; mode?: CommunicationMode; purpose?: string; result?: string | null }
+      >
+      student_profiles: Tbl<
+        {
+          student_id: string
+          date_of_birth: string | null
+          blood_group: string | null
+          father_name: string | null
+          mother_name: string | null
+          guardian_contact: string | null
+          address: string | null
+          alt_contact: string | null
+          updated_by: string | null
+          updated_at: string
+        },
+        {
+          student_id: string
+          date_of_birth?: string | null
+          blood_group?: string | null
+          father_name?: string | null
+          mother_name?: string | null
+          guardian_contact?: string | null
+          address?: string | null
+          alt_contact?: string | null
+          updated_by?: string | null
+          updated_at?: string
+        },
+        {
+          date_of_birth?: string | null
+          blood_group?: string | null
+          father_name?: string | null
+          mother_name?: string | null
+          guardian_contact?: string | null
+          address?: string | null
+          alt_contact?: string | null
+          updated_by?: string | null
+          updated_at?: string
+        }
+      >
+      student_academic_info: Tbl<
+        {
+          student_id: string
+          backlogs_count: number
+          backlogs_notes: string | null
+          updated_by: string | null
+          updated_at: string
+        },
+        {
+          student_id: string
+          backlogs_count?: number
+          backlogs_notes?: string | null
+          updated_by?: string | null
+          updated_at?: string
+        },
+        {
+          backlogs_count?: number
+          backlogs_notes?: string | null
+          updated_by?: string | null
+          updated_at?: string
+        }
+      >
+      student_achievements: Tbl<
+        {
+          id: string
+          student_id: string
+          category: AchievementCategory
+          title: string
+          description: string | null
+          achieved_date: string | null
+          document_path: string | null
+          created_by: string | null
+          created_at: string
+        },
+        {
+          id?: string
+          student_id: string
+          category?: AchievementCategory
+          title: string
+          description?: string | null
+          achieved_date?: string | null
+          document_path?: string | null
+          created_by?: string | null
+        },
+        never
       >
     }
     Views: Record<string, never>
