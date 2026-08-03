@@ -31,6 +31,20 @@ export interface StudentReportData {
   subjects: StudentSubjectWeek[]
 }
 
+export interface MeetingEntry {
+  date: string
+  time: string
+  agenda: string
+}
+
+export interface CounselingEntry {
+  date: string
+  studentName: string
+  roll: string
+  reason: string
+  remarks: string | null
+}
+
 export interface WeeklyReportParams {
   batchLabel: string
   tgName: string
@@ -39,6 +53,10 @@ export interface WeeklyReportParams {
   rangeEnd: string
   students: StudentReportData[]
   lowAttendanceThreshold: number
+  /** This week's meetings/counseling — rendered once as a unified activity
+   * log (not repeated per student, and meetings never list who attended). */
+  meetings: MeetingEntry[]
+  counseling: CounselingEntry[]
 }
 
 type RGB = readonly [number, number, number]
@@ -81,12 +99,20 @@ function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })
 }
 
+function fmtTime(time: string) {
+  const [h, m] = time.split(":").map(Number)
+  const period = h >= 12 ? "PM" : "AM"
+  const h12 = h % 12 === 0 ? 12 : h % 12
+  return `${h12}:${String(m).padStart(2, "0")} ${period}`
+}
+
 export async function generateWeeklyReportPdf(params: WeeklyReportParams) {
   const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
     import("jspdf"),
     import("jspdf-autotable"),
   ])
-  const { batchLabel, tgName, tgEmail, rangeStart, rangeEnd, students, lowAttendanceThreshold } = params
+  const { batchLabel, tgName, tgEmail, rangeStart, rangeEnd, students, lowAttendanceThreshold, meetings, counseling } =
+    params
 
   const doc = new jsPDF()
   const pageWidth = doc.internal.pageSize.getWidth()
@@ -230,6 +256,8 @@ export async function generateWeeklyReportPdf(params: WeeklyReportParams) {
     const o = pct(s.overallPresent, s.overallTotal)
     return o !== null && o < lowAttendanceThreshold
   }).length
+  const hasActivity = meetings.length > 0 || counseling.length > 0
+  const firstStudentPage = hasActivity ? 3 : 2
 
   drawHeader()
 
@@ -294,8 +322,10 @@ export async function generateWeeklyReportPdf(params: WeeklyReportParams) {
     didDrawCell: (data) => {
       if (data.section !== "body") return
       // Whole row jumps to that student's page — added once per cell so
-      // the entire row is clickable, not just one column.
-      const pageNumber = 2 + data.row.index
+      // the entire row is clickable, not just one column. Offset by
+      // firstStudentPage since an activity log page may or may not have
+      // been inserted between the cover and the student pages.
+      const pageNumber = firstStudentPage + data.row.index
       doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { pageNumber })
 
       if (data.column.index === 3) {
@@ -330,6 +360,86 @@ export async function generateWeeklyReportPdf(params: WeeklyReportParams) {
     align: "right",
   })
   drawFooter("Class summary")
+
+  // ---------------------------------------------------- TG activity (unified)
+  // One shared page for the whole batch — not repeated per student. Meetings
+  // list what was covered, deliberately without who attended; attendance for
+  // a meeting is recorded elsewhere (the minutes PDF) for whoever needs it.
+  if (hasActivity) {
+    doc.addPage()
+    drawHeader()
+
+    doc.setFont("helvetica", "bold")
+    doc.setFontSize(6.5)
+    doc.setTextColor(...MUTED)
+    doc.text("OFFICE / TG COPY — ACTIVITY LOG", margin, 34)
+    doc.setFontSize(15)
+    doc.setTextColor(...INK)
+    doc.text("This week's meetings & counseling", margin, 42)
+
+    let activityY = 52
+    let lastTableDrawn = false
+
+    doc.setFont("helvetica", "bold")
+    doc.setFontSize(10)
+    doc.setTextColor(...INK)
+    doc.text("Meetings", margin, activityY)
+    if (meetings.length > 0) {
+      autoTable(doc, {
+        startY: activityY + 4,
+        head: [["Date", "Time", "Agenda"]],
+        body: meetings.map((m) => [fmtDate(m.date), fmtTime(m.time), m.agenda]),
+        margin: { top: 34, left: margin, right: margin, bottom: 16 },
+        styles: { fontSize: 8.5 },
+        headStyles: { fillColor: TEAL as unknown as [number, number, number] },
+        columnStyles: { 0: { cellWidth: 28 }, 1: { cellWidth: 22 } },
+        didDrawPage: () => {
+          drawHeader()
+          drawFooter("Activity log")
+        },
+      })
+      activityY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10
+      lastTableDrawn = true
+    } else {
+      doc.setFont("helvetica", "normal")
+      doc.setFontSize(9)
+      doc.setTextColor(...MUTED)
+      doc.text("No meetings recorded this week.", margin, activityY + 6)
+      activityY += 14
+      lastTableDrawn = false
+    }
+
+    doc.setFont("helvetica", "bold")
+    doc.setFontSize(10)
+    doc.setTextColor(...INK)
+    doc.text("Counseling sessions", margin, activityY)
+    if (counseling.length > 0) {
+      autoTable(doc, {
+        startY: activityY + 4,
+        head: [["Date", "Student", "Reason", "Remarks"]],
+        body: counseling.map((c) => [fmtDate(c.date), `${c.roll} — ${c.studentName}`, c.reason, c.remarks ?? "—"]),
+        margin: { top: 34, left: margin, right: margin, bottom: 16 },
+        styles: { fontSize: 8.5 },
+        headStyles: { fillColor: TEAL as unknown as [number, number, number] },
+        columnStyles: { 0: { cellWidth: 24 } },
+        didDrawPage: () => {
+          drawHeader()
+          drawFooter("Activity log")
+        },
+      })
+      lastTableDrawn = true
+    } else {
+      doc.setFont("helvetica", "normal")
+      doc.setFontSize(9)
+      doc.setTextColor(...MUTED)
+      doc.text("No counseling sessions recorded this week.", margin, activityY + 6)
+      lastTableDrawn = false
+    }
+
+    // Only draw the footer here if the last thing on the page was plain
+    // text — a table's own didDrawPage already drew it for that page.
+    if (!lastTableDrawn) drawFooter("Activity log")
+  }
 
   // ------------------------------------------------------- per-student pages
   for (const student of students) {

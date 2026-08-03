@@ -1,7 +1,17 @@
 import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
-import { FlameKindling, UsersRound, AlertTriangle, Award, Users, FileDown } from "lucide-react"
+import {
+  FlameKindling,
+  UsersRound,
+  AlertTriangle,
+  Award,
+  Users,
+  FileDown,
+  CalendarClock,
+  HeartHandshake,
+  MessageCircle,
+} from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/hooks/use-auth"
 import {
@@ -262,6 +272,87 @@ export default function TgDashboardPage() {
     return map
   }, [cohortSubjects])
 
+  // Lifetime counts for the dashboard tiles — how much TG record-keeping
+  // has actually happened, not scoped to any one week.
+  const { data: meetingsCount } = useQuery({
+    queryKey: ["tg-meetings-count", teacher?.id],
+    enabled: !!teacher,
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from("tg_meetings")
+        .select("id", { count: "exact", head: true })
+        .eq("tg_teacher_id", teacher!.id)
+      if (error) throw error
+      return count ?? 0
+    },
+  })
+
+  const { data: counselingCount } = useQuery({
+    queryKey: ["tg-counseling-count", teacher?.id],
+    enabled: !!teacher,
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from("tg_counseling_sessions")
+        .select("id", { count: "exact", head: true })
+        .eq("tg_teacher_id", teacher!.id)
+      if (error) throw error
+      return count ?? 0
+    },
+  })
+
+  const { data: communicationsCount } = useQuery({
+    queryKey: ["tg-communications-count", teacher?.id],
+    enabled: !!teacher,
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from("tg_communications")
+        .select("id", { count: "exact", head: true })
+        .eq("tg_teacher_id", teacher!.id)
+      if (error) throw error
+      return count ?? 0
+    },
+  })
+
+  // This week's meetings/counseling — folded into the downloadable report as
+  // a single unified activity log, not repeated on every student's page.
+  const { data: weekMeetings } = useQuery({
+    queryKey: ["tg-meetings-week", teacher?.id, weekRange.start, weekRange.end],
+    enabled: !!teacher,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("tg_meetings")
+        .select("meeting_date, meeting_time, agenda")
+        .eq("tg_teacher_id", teacher!.id)
+        .gte("meeting_date", weekRange.start)
+        .lte("meeting_date", weekRange.end)
+        .order("meeting_date")
+      if (error) throw error
+      return data
+    },
+  })
+
+  const { data: weekCounseling } = useQuery({
+    queryKey: ["tg-counseling-week", teacher?.id, weekRange.start, weekRange.end],
+    enabled: !!teacher,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("tg_counseling_sessions")
+        .select("session_date, reason, remarks, enrollment:student_enrollments(roll_code, external_roll_no, roll_seq, student:students(name))")
+        .eq("tg_teacher_id", teacher!.id)
+        .gte("session_date", weekRange.start)
+        .lte("session_date", weekRange.end)
+        .order("session_date")
+      if (error) throw error
+      type Row = {
+        session_date: string
+        reason: string
+        remarks: string | null
+        enrollment: { roll_code: string; external_roll_no: string | null; roll_seq: number; student: { name: string } | null } | null
+      }
+      return data as unknown as Row[]
+    },
+  })
+
   const [reportPending, setReportPending] = useState(false)
 
   async function handleDownloadReport() {
@@ -304,6 +395,18 @@ export default function TgDashboardPage() {
         rangeEnd: weekRange.end,
         students,
         lowAttendanceThreshold: LOW_ATTENDANCE_THRESHOLD,
+        meetings: (weekMeetings ?? []).map((m) => ({
+          date: m.meeting_date,
+          time: m.meeting_time,
+          agenda: m.agenda,
+        })),
+        counseling: (weekCounseling ?? []).map((c) => ({
+          date: c.session_date,
+          studentName: c.enrollment?.student?.name ?? "—",
+          roll: c.enrollment ? displayRoll(c.enrollment) : "—",
+          reason: c.reason,
+          remarks: c.remarks,
+        })),
       })
     } finally {
       setReportPending(false)
@@ -359,6 +462,33 @@ export default function TgDashboardPage() {
           accentClassName={flaggedCount > 0 ? "text-red-600" : undefined}
         />
         <StatTile icon={Award} iconClassName="bg-sky-100 text-sky-600" label="Avg latest SGPA" value={avgSgpa} />
+      </div>
+
+      <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
+        <Link to="/tg/records">
+          <StatTile
+            icon={CalendarClock}
+            iconClassName="bg-violet-100 text-violet-600"
+            label="Meetings held"
+            value={String(meetingsCount ?? 0)}
+          />
+        </Link>
+        <Link to="/tg/records">
+          <StatTile
+            icon={HeartHandshake}
+            iconClassName="bg-pink-100 text-pink-600"
+            label="Counseling sessions"
+            value={String(counselingCount ?? 0)}
+          />
+        </Link>
+        <Link to="/tg/records">
+          <StatTile
+            icon={MessageCircle}
+            iconClassName="bg-slate-200 text-slate-600"
+            label="Communications logged"
+            value={String(communicationsCount ?? 0)}
+          />
+        </Link>
       </div>
 
       <Card className="border-slate-200/70 bg-white/70 shadow-sm backdrop-blur-sm">
