@@ -9,6 +9,7 @@ export interface MeetingMinutesParams {
   meetingDate: string
   meetingTime: string
   agenda: string
+  minutes: string | null
   attendees: { roll: string; name: string; present: boolean }[]
 }
 
@@ -28,7 +29,7 @@ export async function generateMeetingMinutesPdf(params: MeetingMinutesParams) {
     import("jspdf"),
     import("jspdf-autotable"),
   ])
-  const { batchLabel, tgName, meetingDate, meetingTime, agenda, attendees } = params
+  const { batchLabel, tgName, meetingDate, meetingTime, agenda, minutes, attendees } = params
 
   const TEAL: [number, number, number] = [13, 108, 101]
   const TEAL_BG: [number, number, number] = [235, 249, 247]
@@ -103,8 +104,22 @@ export async function generateMeetingMinutesPdf(params: MeetingMinutesParams) {
   const agendaLines = doc.splitTextToSize(agenda, pageWidth - margin * 2)
   doc.text(agendaLines, margin, agendaY + 6)
 
+  let cursorY = agendaY + 6 + agendaLines.length * 4.5 + 8
+
+  if (minutes) {
+    doc.setFont("helvetica", "bold")
+    doc.setFontSize(9.5)
+    doc.setTextColor(...INK)
+    doc.text("Minutes of meeting", margin, cursorY)
+    doc.setFont("helvetica", "normal")
+    doc.setFontSize(9)
+    const minutesLines = doc.splitTextToSize(minutes, pageWidth - margin * 2)
+    doc.text(minutesLines, margin, cursorY + 6)
+    cursorY += 6 + minutesLines.length * 4.5 + 8
+  }
+
   const presentCount = attendees.filter((a) => a.present).length
-  const afterAgendaY = agendaY + 6 + agendaLines.length * 4.5 + 6
+  const afterAgendaY = cursorY
 
   doc.setFont("helvetica", "bold")
   doc.setFontSize(9.5)

@@ -313,6 +313,24 @@ export default function TgDashboardPage() {
     },
   })
 
+  // Per-student count, for the roster table's "Called" column — how many
+  // times this TG has logged a communication with each student.
+  const { data: communicationsByEnrollment } = useQuery({
+    queryKey: ["tg-communications-by-enrollment", teacher?.id, enrollmentIds],
+    enabled: !!teacher && enrollmentIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("tg_communications")
+        .select("enrollment_id")
+        .eq("tg_teacher_id", teacher!.id)
+        .in("enrollment_id", enrollmentIds)
+      if (error) throw error
+      const map = new Map<string, number>()
+      for (const r of data ?? []) map.set(r.enrollment_id, (map.get(r.enrollment_id) ?? 0) + 1)
+      return map
+    },
+  })
+
   // This week's meetings/counseling — folded into the downloadable report as
   // a single unified activity log, not repeated on every student's page.
   const { data: weekMeetings } = useQuery({
@@ -498,7 +516,7 @@ export default function TgDashboardPage() {
               <TableHead>Roll</TableHead>
               <TableHead>Name</TableHead>
               <TableHead>Attendance</TableHead>
-              <TableHead>Latest SGPA</TableHead>
+              <TableHead>Called</TableHead>
               <TableHead></TableHead>
             </TableRow>
           </TableHeader>
@@ -516,7 +534,7 @@ export default function TgDashboardPage() {
               .map((e) => {
                 const a = attendanceByEnrollment.get(e.id)
                 const pct = a && a.total > 0 ? Math.round((a.present / a.total) * 100) : null
-                const gpa = latestGpaByEnrollment.get(e.id)
+                const calledCount = communicationsByEnrollment?.get(e.id) ?? 0
                 const low = pct !== null && pct < LOW_ATTENDANCE_THRESHOLD
                 const streak = streakByEnrollment.get(e.id) ?? 0
                 const flagged = streak >= ABSENCE_FLAG_THRESHOLD
@@ -543,7 +561,13 @@ export default function TgDashboardPage() {
                         <Badge variant={low ? "destructive" : "secondary"}>{pct}%</Badge>
                       )}
                     </TableCell>
-                    <TableCell>{gpa ?? "—"}</TableCell>
+                    <TableCell>
+                      {calledCount > 0 ? (
+                        <Badge variant="outline">{calledCount}×</Badge>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <Link to={`/tg/${e.id}`} className="text-sm font-medium text-teal-700 underline-offset-4 hover:underline">
                         View

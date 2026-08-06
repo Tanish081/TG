@@ -282,6 +282,7 @@ export interface Database {
           meeting_date: string
           meeting_time: string
           agenda: string
+          minutes: string | null
           created_at: string
         },
         {
@@ -291,8 +292,9 @@ export interface Database {
           meeting_date: string
           meeting_time: string
           agenda: string
+          minutes?: string | null
         },
-        { meeting_date?: string; meeting_time?: string; agenda?: string }
+        { meeting_date?: string; meeting_time?: string; agenda?: string; minutes?: string | null }
       >
       tg_meeting_attendance: Tbl<
         { id: string; meeting_id: string; enrollment_id: string; present: boolean },

@@ -144,6 +144,7 @@ export default function TgRecordsPage() {
   const [meetingDate, setMeetingDate] = useState(todayISO())
   const [meetingTime, setMeetingTime] = useState("15:00")
   const [agenda, setAgenda] = useState("")
+  const [minutes, setMinutes] = useState("")
   const [attendanceMap, setAttendanceMap] = useState<Record<string, boolean>>({})
 
   const meetingRoster = meetingBatchId ? (enrollmentsByBatch.get(meetingBatchId) ?? []) : []
@@ -154,6 +155,7 @@ export default function TgRecordsPage() {
     setMeetingDate(todayISO())
     setMeetingTime("15:00")
     setAgenda("")
+    setMinutes("")
     const roster = enrollmentsByBatch.get(defaultBatchId) ?? []
     setAttendanceMap(Object.fromEntries(roster.map((e) => [e.id, true])))
     setMeetingOpen(true)
@@ -176,6 +178,7 @@ export default function TgRecordsPage() {
           meeting_date: meetingDate,
           meeting_time: meetingTime,
           agenda,
+          minutes: minutes || null,
         })
         .select()
         .single()
@@ -235,6 +238,7 @@ export default function TgRecordsPage() {
       meetingDate: meeting.meeting_date,
       meetingTime: meeting.meeting_time,
       agenda: meeting.agenda,
+      minutes: meeting.minutes,
       attendees,
     })
   }
@@ -416,6 +420,16 @@ export default function TgRecordsPage() {
                     <Textarea id="m-agenda" value={agenda} onChange={(e) => setAgenda(e.target.value)} rows={3} />
                   </div>
                   <div className="flex flex-col gap-2">
+                    <Label htmlFor="m-minutes">Minutes of meeting</Label>
+                    <Textarea
+                      id="m-minutes"
+                      placeholder="What was actually discussed and decided — optional, fill in after the meeting"
+                      value={minutes}
+                      onChange={(e) => setMinutes(e.target.value)}
+                      rows={3}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
                     <div className="flex items-center justify-between">
                       <Label>
                         Attendance ({Object.values(attendanceMap).filter(Boolean).length}/{meetingRoster.length} present)
@@ -481,20 +495,21 @@ export default function TgRecordsPage() {
                   <TableHead>Time</TableHead>
                   <TableHead>Batch</TableHead>
                   <TableHead>Agenda</TableHead>
+                  <TableHead>MoM</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {meetingsLoading && (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-muted-foreground">
+                    <TableCell colSpan={6} className="text-center text-muted-foreground">
                       Loading…
                     </TableCell>
                   </TableRow>
                 )}
                 {!meetingsLoading && meetings?.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-muted-foreground">
+                    <TableCell colSpan={6} className="text-center text-muted-foreground">
                       No meetings recorded yet
                     </TableCell>
                   </TableRow>
@@ -504,7 +519,8 @@ export default function TgRecordsPage() {
                     <TableCell>{new Date(m.meeting_date).toLocaleDateString()}</TableCell>
                     <TableCell>{m.meeting_time.slice(0, 5)}</TableCell>
                     <TableCell>{batchLabel(batches.find((b) => b.id === m.batch_id))}</TableCell>
-                    <TableCell className="max-w-xs truncate">{m.agenda}</TableCell>
+                    <TableCell className="max-w-[12rem] truncate">{m.agenda}</TableCell>
+                    <TableCell className="max-w-[12rem] truncate text-muted-foreground">{m.minutes ?? "—"}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
                         <Button variant="outline" size="sm" onClick={() => handleDownloadMinutes(m)}>

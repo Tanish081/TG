@@ -14,6 +14,7 @@ create table if not exists tg_meetings (
   meeting_date   date not null,
   meeting_time   time not null,
   agenda         text not null,
+  minutes        text,
   created_at     timestamptz not null default now()
 );
 
